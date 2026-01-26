@@ -1,303 +1,226 @@
 ﻿using Microsoft.Win32;
 using OpenCvSharp;
-using OpenCvSharp.WpfExtensions; // 必须引用 OpenCvSharp.WpfExtensions
+using OpenCvSharp.WpfExtensions;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using edge_runtime; // 确认 OnnxHelper.cs 里的 namespace 是什么
 
 namespace edge_runtime
 {
-    public partial class MainWindow : System.Windows.Window, INotifyPropertyChanged
+    public partial class MainWindow : System.Windows.Window
     {
-        // 核心成员变量
+        // UI 绑定的数据源 (对应界面上的几大列)
+        public ObservableCollection<ProcessActionViewModel> ActionColumns { get; set; }
+            = new ObservableCollection<ProcessActionViewModel>();
+
+        // 逻辑执行队列 (扁平化，严格顺序)
+        // 这里的对象引用和 ActionColumns 里的是同一个，所以改这里的颜色，UI会自动变
+        private List<ProcessStateViewModel> _executionQueue = new List<ProcessStateViewModel>();
+        private int _currentStepIndex = 0;
+
+        // 核心组件
         private VideoCapture _capture;
         private CancellationTokenSource _cts;
         private OnnxInferenceService _aiService;
-        private int _currentStepIndex = 0; // 当前执行到第几步
 
-        // UI 数据源
-        public ObservableCollection<RuntimeNodeView> RuntimeNodes { get; set; }
+        // 颜色定义
+        private readonly Brush COLOR_PENDING = new SolidColorBrush(Color.FromRgb(80, 80, 80));   // 灰
+        private readonly Brush COLOR_RUNNING = new SolidColorBrush(Color.FromRgb(52, 152, 219)); // 蓝
+        private readonly Brush COLOR_SUCCESS = new SolidColorBrush(Color.FromRgb(39, 174, 96));  // 绿
+        private readonly Brush COLOR_FAIL = new SolidColorBrush(Color.FromRgb(192, 57, 43));  // 红
+        private readonly Brush BORDER_HIGHLIGHT = Brushes.Yellow;
 
         public MainWindow()
         {
             InitializeComponent();
-            DataContext = this; // 设置数据上下文，方便 XAML 绑定
-            RuntimeNodes = new ObservableCollection<RuntimeNodeView>();
+            DataContext = this; // 这一步至关重要，让 XAML 能找到 ActionColumns
         }
-
-        #region 核心逻辑：加载并解析 JSON
 
         private void BtnLoadProject_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new OpenFileDialog { Filter = "流程文件 (*.json)|*.json" };
             if (dlg.ShowDialog() == true)
             {
-                try
+                LoadAndParseJson(dlg.FileName);
+            }
+        }
+
+        private void LoadAndParseJson(string filepath)
+        {
+            try
+            {
+                string json = File.ReadAllText(filepath);
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+                // 1. 反序列化 (使用你原来的 WorkflowModel 类)
+                var workflow = JsonSerializer.Deserialize<WorkflowStructure>(json, options);
+
+                if (workflow == null || workflow.Actions == null) return;
+
+                // 2. 重置数据
+                ActionColumns.Clear();
+                _executionQueue.Clear();
+                _currentStepIndex = 0;
+
+                // 3. 构建 ViewModel 和 执行队列
+                foreach (var actionData in workflow.Actions)
                 {
-                    string json = File.ReadAllText(dlg.FileName);
+                    // 创建 UI 列
+                    var columnVM = new ProcessActionViewModel { Name = actionData.Name };
 
-                    // 配置 JSON 忽略大小写，防止字段名大小写不一致导致读取失败
-                    var options = new JsonSerializerOptions
+                    if (actionData.States != null)
                     {
-                        PropertyNameCaseInsensitive = true
-                    };
-
-                    // 1. 反序列化嵌套结构
-                    var workflow = JsonSerializer.Deserialize<WorkflowStructure>(json, options);
-
-                    if (workflow == null || workflow.Actions == null)
-                    {
-                        MessageBox.Show("文件格式不正确，未找到 Actions 节点");
-                        return;
-                    }
-
-                    // 2. 初始化环境
-                    RuntimeNodes.Clear();
-                    _currentStepIndex = 0;
-
-                    // 3. 【关键】将嵌套结构“展平”为线性执行列表
-                    // 这样运行时只需要傻瓜式地按顺序执行 RuntimeNodes[0] -> [1] -> [2]...
-                    foreach (var action in workflow.Actions)
-                    {
-                        // 添加主动作 (Action)
-                        RuntimeNodes.Add(new RuntimeNodeView
+                        foreach (var stateData in actionData.States)
                         {
-                            NodeName = $"【步骤】{action.Name}", // 加粗或特殊标记
-                            StatusColor = Brushes.Gray,
-                            TargetLabel = action.Name, // 假设动作本身也作为一种状态（如果动作只作为标题，可设 Threshold=0 跳过）
-                            Threshold = 0.5f,          // 默认阈值，或者你可以给 Action 加个字段
-                            IsActionHeader = true      // 标记这是主标题
-                        });
-
-                        // 添加该动作下的所有子状态 (States)
-                        if (action.States != null)
-                        {
-                            foreach (var state in action.States)
+                            // 创建单个步骤卡片
+                            var stateVM = new ProcessStateViewModel
                             {
-                                RuntimeNodes.Add(new RuntimeNodeView
-                                {
-                                    NodeName = $"    ↳ {state.Name}", // 缩进显示
-                                    StatusColor = Brushes.Gray,
-                                    TargetLabel = state.SelectedLabel,
-                                    Threshold = (float)state.Threshold,
-                                    IsActionHeader = false
-                                });
-                            }
+                                Id = stateData.Id,
+                                Name = stateData.Name,
+                                TargetLabel = stateData.SelectedLabel, // AI 目标
+                                Threshold = stateData.Threshold,
+                                Background = COLOR_PENDING
+                            };
+
+                            // 同时添加到 UI结构 和 执行队列
+                            columnVM.States.Add(stateVM);
+                            _executionQueue.Add(stateVM);
                         }
                     }
-
-                    // 标记最后一个节点 (用于UI处理)
-                    if (RuntimeNodes.Count > 0)
-                        RuntimeNodes.Last().IsLast = true;
-
-                    // 4. 尝试加载 AI 模型
-                    LoadAiModel();
-
-                    // 5. 启动摄像头和检测循环
-                    StartMonitoringLoop();
+                    ActionColumns.Add(columnVM);
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"加载失败: {ex.Message}\n\n堆栈: {ex.StackTrace}");
-                }
+
+                TxtCurrentStep.Text = "流程已加载，准备就绪";
+
+                // 4. 加载模型并启动
+                LoadAiModel(); // 你之前的逻辑
+                StartMonitoringLoop();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"加载失败: {ex.Message}");
             }
         }
 
-        private void LoadAiModel()
-        {
-            // 这里假设模型就在 exe 旁边，或者你可以写死绝对路径测试
-            // 如果你有特定的模型路径，请在这里修改
-            string modelPath = "model.onnx";
-
-            if (File.Exists(modelPath))
-            {
-                // 假设 OnnxHelper 能从模型里读出 labels，如果不行，你需要手动传入 string[] labels
-                var labels = OnnxHelper.ReadLabelsFromModel(modelPath);
-                _aiService = new OnnxInferenceService(modelPath, labels);
-                Console.WriteLine("模型加载成功！");
-            }
-            else
-            {
-                // 如果没有模型，暂时不报错，方便你先调试流程 UI
-                // MessageBox.Show("未找到 model.onnx，将仅显示视频，无法进行 AI 判定。");
-                _aiService = null;
-            }
-        }
-
-        #endregion
-
-        #region 核心逻辑：视频流与推理循环
-
+        // --- 核心逻辑循环 ---
         private void StartMonitoringLoop()
         {
-            // 停止之前的任务
             _cts?.Cancel();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
 
             Task.Run(() =>
             {
-                // 1. 打开摄像头 (默认索引 0)
-                // TODO: 未来根据 JSON 里的 "CameraDevice" 来选择索引
+                // 打开摄像头 (索引0)
                 _capture = new VideoCapture(0);
-
-                if (!_capture.IsOpened())
-                {
-                    Application.Current.Dispatcher.Invoke(() => MessageBox.Show("无法打开摄像头！"));
-                    return;
-                }
+                if (!_capture.IsOpened()) return;
 
                 using (Mat frame = new Mat())
                 {
                     while (!token.IsCancellationRequested)
                     {
-                        // 读取视频帧
+                        // 1. 获取画面
                         if (!_capture.Read(frame) || frame.Empty())
                         {
-                            Thread.Sleep(10);
-                            continue;
+                            Thread.Sleep(10); continue;
                         }
 
-                        // 2. 更新 UI 视频显示 (必须切回 UI 线程)
-                        // Clone 是为了防止多线程资源竞争
+                        // 2. 更新 UI 视频流
                         var bitmap = frame.Clone().ToBitmapSource();
-                        bitmap.Freeze(); // 冻结对象以便跨线程访问
+                        bitmap.Freeze();
+                        Dispatcher.Invoke(() => VideoFeed.Source = bitmap);
 
-                        Application.Current.Dispatcher.Invoke(() =>
-                        {
-                            VideoFeed.Source = bitmap;
+                        // 3. 执行流程逻辑
+                        ProcessFlowLogic(frame);
 
-                            // 实时更新当前正在进行的步骤高亮（可选）
-                            UpdateCurrentStepVisuals();
-                        });
-
-                        // 3. 执行 AI 推理与逻辑判断
-                        ProcessLogic(frame);
-
-                        // 控制帧率 (~30FPS)
-                        Thread.Sleep(33);
+                        Thread.Sleep(30); // 约 30 FPS
                     }
                 }
                 _capture.Release();
             }, token);
         }
 
-        private void ProcessLogic(Mat frame)
+        private void ProcessFlowLogic(Mat frame)
         {
-            // 如果全部步骤已完成，或者没有模型，就不做处理
-            if (_currentStepIndex >= RuntimeNodes.Count || _aiService == null)
+            // 如果全部完成，停止检测
+            if (_currentStepIndex >= _executionQueue.Count)
+            {
+                Dispatcher.Invoke(() => TxtCurrentStep.Text = "所有流程已完成！");
                 return;
+            }
 
-            // 获取当前需要检测的节点
-            var currentNode = RuntimeNodes[_currentStepIndex];
+            // 获取当前必须完成的步骤 (指针指向这里)
+            var currentStep = _executionQueue[_currentStepIndex];
 
-            // AI 推理
-            // 修复：OnnxInferenceService 提供的方法名是 Predict，而不是 Infer
-            var result = _aiService.Predict(frame);
+            Dispatcher.Invoke(() =>
+            {
+                TxtCurrentStep.Text = $"当前步骤: {currentStep.Name}";
 
-            // 逻辑判定：标签匹配且置信度达标
-            // 注意：如果 currentNode.TargetLabel 为空，可能是标题节点，直接通过
+                // 视觉反馈：将当前步骤设为蓝色（进行中）
+                if (currentStep.Background == COLOR_PENDING)
+                {
+                    currentStep.Background = COLOR_RUNNING;
+                    currentStep.BorderColor = BORDER_HIGHLIGHT;
+                }
+            });
+
+            // 如果没有 AI 服务，或者该步骤没有目标标签（可能是人工确认项），暂时演示为自动通过
+            // 实际项目中这里可能需要等待人工按钮点击
             bool isPassed = false;
 
-            if (string.IsNullOrEmpty(currentNode.TargetLabel))
+            if (_aiService != null && !string.IsNullOrEmpty(currentStep.TargetLabel))
             {
-                isPassed = true; // 没有目标标签，视为仅展示用的标题，直接通过
-            }
-            else
-            {
-                // result 为值类型（struct），这里以 Label 为空判断未识别
-                if (!string.IsNullOrEmpty(result.Label) &&
-                    result.Label == currentNode.TargetLabel &&
-                    result.Confidence >= currentNode.Threshold)
+                var result = _aiService.Predict(frame);
+
+                // 判定逻辑
+                if (result.Label == currentStep.TargetLabel && result.Confidence >= currentStep.Threshold)
                 {
                     isPassed = true;
                 }
             }
+            else
+            {
+                // 模拟没有AI目标时的自动通过 (调试用，你可以删掉)
+                Thread.Sleep(500);
+                isPassed = true;
+            }
 
-            // 如果通过
             if (isPassed)
             {
-                Application.Current.Dispatcher.Invoke(() =>
+                Dispatcher.Invoke(() =>
                 {
-                    // 变绿
-                    currentNode.StatusColor = Brushes.LightGreen;
-                    currentNode.IsCompleted = true; // 可以加个勾选图标
+                    // 1. 变绿
+                    currentStep.Background = COLOR_SUCCESS;
+                    currentStep.BorderColor = Brushes.Transparent;
                 });
 
-                // 移动到下一步
+                // 2. 只有当前步骤成功了，索引才 +1，进入下一个（哪怕下一个在另一列）
                 _currentStepIndex++;
-
-                // 如果全部完成
-                if (_currentStepIndex >= RuntimeNodes.Count)
-                {
-                    Application.Current.Dispatcher.Invoke(() => MessageBox.Show("所有工序已完成！"));
-                }
             }
         }
 
-        private void UpdateCurrentStepVisuals()
+        private void LoadAiModel()
         {
-            // 这里可以用来高亮当前正在检测的那一行（比如加粗或者背景色变黄）
-            // 简单实现略
+            // 复用你原来的代码，只需确保路径正确
+            string modelPath = "model.onnx";
+            if (File.Exists(modelPath))
+            {
+                var labels = OnnxHelper.ReadLabelsFromModel(modelPath);
+                _aiService = new OnnxInferenceService(modelPath, labels);
+            }
         }
 
-        #endregion
-
-        #region 窗口关闭清理
-
-        private void Window_Closing(object sender, CancelEventArgs e)
+        protected override void OnClosed(EventArgs e)
         {
             _cts?.Cancel();
-            if (_capture != null && !_capture.IsDisposed)
-                _capture.Release();
-        }
-
-        #endregion
-
-        // 实现 INotifyPropertyChanged 接口
-        public event PropertyChangedEventHandler PropertyChanged;
-        protected void OnPropertyChanged([CallerMemberName] string name = null)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-        }
-    }
-
-    /// <summary>
-    /// 列表项的 ViewModel，控制 UI 显示
-    /// </summary>
-    public class RuntimeNodeView : INotifyPropertyChanged
-    {
-        private Brush _statusColor;
-        public string NodeName { get; set; }
-
-        public string TargetLabel { get; set; }
-        public float Threshold { get; set; }
-
-        public bool IsActionHeader { get; set; } // 是否是主标题
-        public bool IsLast { get; set; } // 是否是最后一行（用于隐藏箭头）
-        public bool IsCompleted { get; set; }
-
-        public Brush StatusColor
-        {
-            get => _statusColor;
-            set { _statusColor = value; OnPropertyChanged(); }
-        }
-
-        public event PropertyChangedEventHandler PropertyChanged;
-        protected void OnPropertyChanged([CallerMemberName] string name = null)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            _capture?.Dispose();
+            base.OnClosed(e);
         }
     }
 }
