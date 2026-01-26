@@ -1,0 +1,9 @@
+﻿<Application x:Class="edge_runtime.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:edge_runtime"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis" />
+    </Application.Resources>
+</Application>
