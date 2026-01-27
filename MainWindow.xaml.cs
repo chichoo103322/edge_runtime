@@ -179,13 +179,33 @@ namespace edge_runtime
                         // 尝试解析 ID (假设是数字索引 "0", "1")
                         if (int.TryParse(device.DeviceId, out int camIndex))
                         {
-                            // 尝试打开相机
-                            using (var tempCap = new VideoCapture(camIndex))
+                            // 尝试打开相机，添加超时控制
+                            var capTask = Task.Run(() =>
                             {
-                                if (tempCap.IsOpened())
+                                try
                                 {
-                                    isOnline = true;
+                                    using (var tempCap = new VideoCapture(camIndex))
+                                    {
+                                        // 设置打开超时
+                                        tempCap.Set(VideoCaptureProperties.BufferSize, 1);
+                                        if (tempCap.IsOpened())
+                                        {
+                                            return true;
+                                        }
+                                    }
                                 }
+                                catch { }
+                                return false;
+                            });
+
+                            // 等待最多 2 秒
+                            if (capTask.Wait(TimeSpan.FromSeconds(2)))
+                            {
+                                isOnline = capTask.Result;
+                            }
+                            else
+                            {
+                                isOnline = false; // 超时视为离线
                             }
                         }
                         else
@@ -236,33 +256,57 @@ namespace edge_runtime
             {
                 // 这里暂时默认打开索引 0 的相机作为主视频流
                 // 未来可以根据 CurrentStep.CameraId 动态切换 _capture
-                _capture = new VideoCapture(0);
-
-                if (!_capture.IsOpened())
+                try
                 {
-                    Dispatcher.Invoke(() => MessageBox.Show("无法打开主摄像头 (ID: 0)"));
-                    return;
-                }
+                    _capture = new VideoCapture(0);
 
-                using (Mat frame = new Mat())
-                {
-                    while (!token.IsCancellationRequested)
+                    // 设置缓冲区大小以减少延迟
+                    _capture.Set(VideoCaptureProperties.BufferSize, 1);
+
+                    // 添加超时检查
+                    int retries = 0;
+                    const int maxRetries = 10;
+                    while (!_capture.IsOpened() && retries < maxRetries && !token.IsCancellationRequested)
                     {
-                        if (!_capture.Read(frame) || frame.Empty())
+                        retries++;
+                        Thread.Sleep(100);
+                    }
+
+                    if (!_capture.IsOpened())
+                    {
+                        Dispatcher.Invoke(() => MessageBox.Show("无法打开主摄像头 (ID: 0)，请检查相机是否被占用或掉线"));
+                        return;
+                    }
+
+                    using (Mat frame = new Mat())
+                    {
+                        while (!token.IsCancellationRequested)
                         {
-                            Thread.Sleep(10); continue;
+                            if (!_capture.Read(frame) || frame.Empty())
+                            {
+                                Thread.Sleep(10);
+                                continue;
+                            }
+
+                            var bitmap = frame.Clone().ToBitmapSource();
+                            bitmap.Freeze();
+                            Dispatcher.Invoke(() => VideoFeed.Source = bitmap);
+
+                            ProcessFlowLogic(frame);
+
+                            Thread.Sleep(30);
                         }
-
-                        var bitmap = frame.Clone().ToBitmapSource();
-                        bitmap.Freeze();
-                        Dispatcher.Invoke(() => VideoFeed.Source = bitmap);
-
-                        ProcessFlowLogic(frame);
-
-                        Thread.Sleep(30);
                     }
                 }
-                _capture.Release();
+                catch (Exception ex)
+                {
+                    Dispatcher.Invoke(() => MessageBox.Show($"监控循环错误: {ex.Message}"));
+                }
+                finally
+                {
+                    _capture?.Release();
+                    _capture?.Dispose();
+                }
             }, token);
         }
 
@@ -343,10 +387,10 @@ namespace edge_runtime
                 Dispatcher.Invoke(() => MessageBox.Show($"AI 模型已加载: {modelPath}"));
             }
             catch (Exception ex)
-             {
-                 Dispatcher.Invoke(() => MessageBox.Show($"加载 AI 模型失败: {ex.Message}"));
-             }
-         }
+            {
+                Dispatcher.Invoke(() => MessageBox.Show($"加载 AI 模型失败: {ex.Message}"));
+            }
+        }
 
         // [新增] 打开步骤关联的视频播放窗口（通过步骤卡片上的按钮点击）
         private void OnStepVideo_Click(object sender, RoutedEventArgs e)
@@ -366,7 +410,16 @@ namespace edge_runtime
                 }
 
                 // 设置视频源
-                StandardPlayer.Source = new Uri(step.VideoPath, UriKind.Absolute);
+                try
+                {
+                    var fullPath = Path.GetFullPath(step.VideoPath);
+                    StandardPlayer.Source = new Uri(fullPath);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"设置视频源失败: {ex.Message}");
+                    return;
+                }
 
                 // 打开 Popup
                 VideoPopup.IsOpen = true;

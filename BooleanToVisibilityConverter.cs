@@ -20,4 +20,22 @@ namespace edge_runtime
             throw new NotImplementedException();
         }
     }
+
+    // 普通的布尔到可见性转换器：true => Visible, false => Collapsed
+    public class BoolToVisibilityConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is bool boolValue && boolValue)
+                return Visibility.Visible;
+            return Visibility.Collapsed;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is Visibility vis)
+                return vis == Visibility.Visible;
+            return DependencyProperty.UnsetValue;
+        }
+    }
 }

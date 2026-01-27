@@ -6,7 +6,7 @@ namespace edge_runtime
     public class WorkflowStructure
     {
         public List<ActionStep> Actions { get; set; } = new List<ActionStep>();
-        public string ModelPath { get; set; }
+        public string ModelPath { get; set; } = string.Empty;  // AI 模型路径
     }
 
     // 对应 Actions 列表里的每一项
@@ -30,6 +30,6 @@ namespace edge_runtime
         public string CameraDevice { get; set; }
 
         // 新增：标准作业指导视频路径
-        public string StandardVideoPath { get; set; }
+        public string StandardVideoPath { get; set; } = string.Empty;
     }
 }

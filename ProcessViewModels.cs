@@ -29,7 +29,7 @@ namespace edge_runtime
             set { _cameraId = value; OnPropertyChanged(); }
         }
 
-        // 新增：该步骤的标准作业指导视频路径
+        // 新增：标准作业指导视频路径
         private string _videoPath = string.Empty;
         public string VideoPath
         {
@@ -37,7 +37,7 @@ namespace edge_runtime
             set { _videoPath = value; OnPropertyChanged(); }
         }
 
-        // 新增：是否有视频（用于控制按钮是否可用）
+        // 新增：是否有关联的视频
         private bool _hasVideo = false;
         public bool HasVideo
         {
