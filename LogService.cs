@@ -7,12 +7,13 @@ namespace edge_runtime
 {
     public class LogService
     {
-        private readonly string _connectionString;
+        // 数据库连接字符串（请根据实际情况修改）
+        private const string CONNECTION_STRING = "Server=localhost;Database=edge_runtime;User=root;Password=your_password;Charset=utf8mb4;";
+        
         private readonly string _logDirectory;
 
-        public LogService(string connectionString, string logDirectory = "ErrorLogs")
+        public LogService(string logDirectory = "ErrorLogs")
         {
-            _connectionString = connectionString;
             _logDirectory = logDirectory;
 
             // 创建日志目录（如果不存在）
@@ -23,12 +24,13 @@ namespace edge_runtime
         }
 
         /// <summary>
-        /// 保存错误帧图片
+        /// 保存帧图片到磁盘
         /// </summary>
         /// <param name="frame">OpenCvSharp Mat 对象</param>
         /// <param name="stepName">步骤名称</param>
+        /// <param name="status">状态标签（OK/NG）</param>
         /// <returns>保存的图片文件路径</returns>
-        public string SaveErrorImage(Mat frame, string stepName)
+        public string SaveFrame(Mat frame, string stepName, string status = "NG")
         {
             if (frame == null || frame.Empty())
             {
@@ -37,13 +39,13 @@ namespace edge_runtime
 
             try
             {
-                // 生成文件名
+                // 生成文件名格式: 时间戳_步骤名_状态.jpg
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
                 string sanitizedStepName = SanitizeFileName(stepName);
-                string fileName = $"NG_{timestamp}_{sanitizedStepName}.jpg";
+                string fileName = $"{timestamp}_{sanitizedStepName}_{status}.jpg";
                 string filePath = Path.Combine(_logDirectory, fileName);
 
-                // 设置JPEG压缩参数
+                // 设置JPEG压缩参数（质量70）
                 var param = new int[] { (int)ImwriteFlags.JpegQuality, 70 };
 
                 // 保存图片
@@ -59,30 +61,28 @@ namespace edge_runtime
         }
 
         /// <summary>
-        /// 记录流程结果到数据库
+        /// 记录流程结果到 MySQL 数据库
         /// </summary>
         /// <param name="stepName">步骤名称</param>
-        /// <param name="isSuccess">是否成功</param>
-        /// <param name="msg">消息/备注</param>
+        /// <param name="status">状态（OK/NG/Complete）</param>
         /// <param name="imagePath">图片路径（可选）</param>
-        public void LogResult(string stepName, bool isSuccess, string msg, string imagePath = null)
+        public void LogToDb(string stepName, string status, string imagePath = null)
         {
             try
             {
-                using (var connection = new MySqlConnection(_connectionString))
+                using (var connection = new MySqlConnection(CONNECTION_STRING))
                 {
                     connection.Open();
 
-                    string query = @"INSERT INTO workflow_logs (created_at, step_name, status, image_path, error_msg) 
-                                     VALUES (@created_at, @step_name, @status, @image_path, @error_msg)";
+                    string query = @"INSERT INTO workflow_logs (time, step, status, img_path) 
+                                     VALUES (@time, @step, @status, @img_path)";
 
                     using (var command = new MySqlCommand(query, connection))
                     {
-                        command.Parameters.AddWithValue("@created_at", DateTime.Now);
-                        command.Parameters.AddWithValue("@step_name", stepName ?? string.Empty);
-                        command.Parameters.AddWithValue("@status", isSuccess ? "success" : "failed");
-                        command.Parameters.AddWithValue("@image_path", imagePath ?? string.Empty);
-                        command.Parameters.AddWithValue("@error_msg", msg ?? string.Empty);
+                        command.Parameters.AddWithValue("@time", DateTime.Now);
+                        command.Parameters.AddWithValue("@step", stepName ?? string.Empty);
+                        command.Parameters.AddWithValue("@status", status ?? string.Empty);
+                        command.Parameters.AddWithValue("@img_path", imagePath ?? string.Empty);
 
                         command.ExecuteNonQuery();
                     }
@@ -95,7 +95,7 @@ namespace edge_runtime
         }
 
         /// <summary>
-        /// 清理非法文件名字符
+        /// 清理文件名中的非法字符
         /// </summary>
         private string SanitizeFileName(string fileName)
         {

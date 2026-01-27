@@ -52,12 +52,17 @@ namespace edge_runtime
         // 错误动作定义（工业级质量控制）
         private static readonly HashSet<string> ERROR_ACTIONS = new HashSet<string>
         {
+            "Wrong_Action",
             "UsingPhone",
             "WrongHand",
             "NotWearing",
             "Distracted",
             "IncorrectPosture"
         };
+
+        // 步骤计时器，用于检测连续无操作超时
+        private Dictionary<int, DateTime> _stepLastDetectTime = new Dictionary<int, DateTime>();
+        private const int DETECTION_TIMEOUT_SECONDS = 10;
 
         // 颜色定义
         private readonly Brush COLOR_PENDING = new SolidColorBrush(Color.FromRgb(80, 80, 80));
@@ -322,16 +327,23 @@ namespace edge_runtime
 
         private void ProcessFlowLogic(Mat frame)
         {
-            // 前提：如果 AI 服务未加载，不做任何处理
+            // 严格模式：如果 AI 服务未加载，绝不做任何处理
             if (_aiService == null)
             {
                 return;
             }
 
-            // 流程已完成，进入下一轮
+            // 无限循环：检查是否所有步骤已完成
             if (_currentStepIndex >= _executionQueue.Count)
             {
-                Dispatcher.Invoke(() => TxtCurrentStep.Text = "所有流程已完成，准备下一轮...");
+                Dispatcher.Invoke(() => TxtCurrentStep.Text = "⏹ 产品完成，准备下一轮...");
+                
+                // 记录产品完成
+                _logService?.LogToDb("Product_Complete", "Complete");
+
+                // 重置计时器
+                _stepLastDetectTime.Clear();
+
                 Thread.Sleep(1000);
                 ResetUI();
                 _currentStepIndex = 0;
@@ -339,6 +351,12 @@ namespace edge_runtime
             }
 
             var currentStep = _executionQueue[_currentStepIndex];
+
+            // 初始化当前步骤的计时器（第一次进入此步骤）
+            if (!_stepLastDetectTime.ContainsKey(_currentStepIndex))
+            {
+                _stepLastDetectTime[_currentStepIndex] = DateTime.Now;
+            }
 
             // 更新 UI：标记当前步骤为运行中
             Dispatcher.Invoke(() =>
@@ -361,7 +379,7 @@ namespace edge_runtime
             // 获取 AI 识别结果
             var result = _aiService.Predict(frame);
 
-            // 情况 B：检测到错误动作
+            // 异常检测：检测到错误动作
             if (ERROR_ACTIONS.Contains(result.Label))
             {
                 Dispatcher.Invoke(() =>
@@ -371,20 +389,45 @@ namespace edge_runtime
                 });
 
                 // 保存错误图片并记录到数据库
-                string imagePath = _logService?.SaveErrorImage(frame, currentStep.Name);
-                _logService?.LogResult(
+                string imagePath = _logService?.SaveFrame(frame, currentStep.Name, "NG");
+                _logService?.LogToDb(
                     currentStep.Name,
-                    isSuccess: false,
-                    msg: $"检测到错误行为: {result.Label} (置信度: {result.Confidence:P2})",
-                    imagePath: imagePath
+                    "NG",
+                    imagePath
                 );
 
                 return;
             }
 
-            // 情况 A：正确行为
-            if (result.Label == currentStep.TargetLabel && result.Confidence >= currentStep.Threshold)
+            // 异常检测：连续超时（10秒）未检测到正确动作
+            TimeSpan elapsed = DateTime.Now - _stepLastDetectTime[_currentStepIndex];
+            if (elapsed.TotalSeconds > DETECTION_TIMEOUT_SECONDS)
             {
+                Dispatcher.Invoke(() =>
+                {
+                    currentStep.Background = new SolidColorBrush(Color.FromRgb(239, 83, 80)); // 红色
+                    currentStep.BorderColor = Brushes.Transparent;
+                });
+
+                // 记录超时事件
+                string timeoutPath = _logService?.SaveFrame(frame, currentStep.Name, "TIMEOUT");
+                _logService?.LogToDb(
+                    currentStep.Name,
+                    "TIMEOUT",
+                    timeoutPath
+                );
+
+                // 重置计时器，准备下一次检测
+                _stepLastDetectTime[_currentStepIndex] = DateTime.Now;
+                return;
+            }
+
+            // 正确行为判定
+            if (!string.IsNullOrEmpty(currentStep.TargetLabel) && 
+                result.Label == currentStep.TargetLabel && 
+                result.Confidence >= currentStep.Threshold)
+            {
+                // 更新 UI 为绿色（成功）
                 Dispatcher.Invoke(() =>
                 {
                     currentStep.Background = COLOR_SUCCESS;
@@ -392,18 +435,21 @@ namespace edge_runtime
                 });
 
                 // 记录成功日志
-                _logService?.LogResult(
+                _logService?.LogToDb(
                     currentStep.Name,
-                    isSuccess: true,
-                    msg: $"通过检测: {result.Label} (置信度: {result.Confidence:P2})"
+                    "OK"
                 );
 
+                // 清除该步骤的计时器
+                _stepLastDetectTime.Remove(_currentStepIndex);
+
+                // 进入下一步
                 _currentStepIndex++;
                 return;
             }
 
-            // 情况 C：无操作/等待（置信度低或检测不到目标标签）
-            // 保持当前状态，不做任何改变，继续等待
+            // 情况 C：等待（低置信度或未识别到目标标签）
+            // 保持当前状态运行，继续等待
         }
 
         private void ResetUI()
@@ -425,10 +471,7 @@ namespace edge_runtime
         {
             try
             {
-                // 从 App.xaml.cs 或配置文件中读取数据库连接字符串
-                // 示例连接字符串，请根据实际情况修改
-                string connectionString = "Server=localhost;Database=edge_runtime;User=root;Password=your_password;";
-                _logService = new LogService(connectionString, "ErrorLogs");
+                _logService = new LogService("ErrorLogs");
             }
             catch (Exception ex)
             {
@@ -438,14 +481,25 @@ namespace edge_runtime
 
         private void LoadAiModel(string modelPath)
         {
-            // [修改] 移除硬编码，直接使用传入的 modelPath 参数
             if (string.IsNullOrEmpty(modelPath))
             {
                 Dispatcher.Invoke(() => MessageBox.Show("模型路径为空，将跳过 AI 模型加载"));
                 return;
             }
 
-            if (!File.Exists(modelPath))
+            // 模型路径容错：如果绝对路径不存在，在 BaseDirectory 下寻找同名文件
+            string finalModelPath = modelPath;
+            if (!File.Exists(finalModelPath))
+            {
+                string fileName = Path.GetFileName(modelPath);
+                string alternativePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+                if (File.Exists(alternativePath))
+                {
+                    finalModelPath = alternativePath;
+                }
+            }
+
+            if (!File.Exists(finalModelPath))
             {
                 Dispatcher.Invoke(() => MessageBox.Show($"模型文件不存在: {modelPath}"));
                 return;
@@ -453,9 +507,9 @@ namespace edge_runtime
 
             try
             {
-                var labels = OnnxHelper.ReadLabelsFromModel(modelPath);
-                _aiService = new OnnxInferenceService(modelPath, labels);
-                Dispatcher.Invoke(() => MessageBox.Show($"AI 模型已加载: {modelPath}"));
+                var labels = OnnxHelper.ReadLabelsFromModel(finalModelPath);
+                _aiService = new OnnxInferenceService(finalModelPath, labels);
+                Dispatcher.Invoke(() => MessageBox.Show($"AI 模型已加载: {finalModelPath}"));
             }
             catch (Exception ex)
             {
