@@ -131,13 +131,46 @@
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
                                                         <StackPanel Margin="0,8">
-                                                            <Border Background="{Binding Background}" 
-                                                                    BorderBrush="{Binding BorderColor}" BorderThickness="3"
-                                                                    CornerRadius="25" Height="50">
-                                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" 
-                                                                           HorizontalAlignment="Center" FontWeight="Bold" 
-                                                                           FontSize="16" Foreground="White"/>
-                                                            </Border>
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                    <ColumnDefinition Width="Auto"/>
+                                                                </Grid.ColumnDefinitions>
+
+                                                                <Border Grid.Column="0" Background="{Binding Background}" 
+                                                                        BorderBrush="{Binding BorderColor}" BorderThickness="3"
+                                                                        CornerRadius="25" Height="50">
+                                                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" 
+                                                                               HorizontalAlignment="Center" FontWeight="Bold" 
+                                                                               FontSize="16" Foreground="White"/>
+                                                                </Border>
+
+                                                                <!-- 视频按钮：仅当 HasVideo 为 true 时显示 -->
+                                                                <Button Grid.Column="1" Content="🎬" 
+                                                                        Click="OnStepVideo_Click" 
+                                                                        Tag="{Binding}"
+                                                                        Margin="5,0,0,0" Padding="6,4" 
+                                                                        Background="#E67E22" Foreground="White" 
+                                                                        FontSize="14" BorderThickness="0"
+                                                                        Visibility="{Binding HasVideo, Converter={StaticResource BoolToVisibility}}"
+                                                                        ToolTip="查看作业指导视频">
+                                                                    <Button.Resources>
+                                                                        <Style TargetType="Button">
+                                                                            <Setter Property="Template">
+                                                                                <Setter.Value>
+                                                                                    <ControlTemplate TargetType="Button">
+                                                                                        <Border Background="{TemplateBinding Background}" 
+                                                                                                CornerRadius="5" Padding="{TemplateBinding Padding}">
+                                                                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                                        </Border>
+                                                                                    </ControlTemplate>
+                                                                                </Setter.Value>
+                                                                            </Setter>
+                                                                        </Style>
+                                                                    </Button.Resources>
+                                                                </Button>
+                                                            </Grid>
+
                                                             <TextBlock Text="⬇" HorizontalAlignment="Center" Foreground="#445577" 
                                                                        FontSize="18" Margin="0,5"/>
                                                         </StackPanel>
@@ -174,18 +207,6 @@
                             <TextBlock Text="📷 在线设备管理" FontWeight="Bold" Foreground="White" FontSize="16" VerticalAlignment="Center"/>
                             <TextBlock Text=" (自动检测)" Foreground="Gray" FontSize="12" VerticalAlignment="Center" Margin="5,0,0,0"/>
                         </StackPanel>
-                    </Border>
-
-                    <Border DockPanel.Dock="Top" Background="#1B5E7E" Padding="10" Margin="0,0,0,5" CornerRadius="5">
-                        <Button x:Name="BtnWatchVideo" Content="🎬 查看作业指导视频" Click="OnWatchVideo_Click" 
-                                Background="#3498db" Foreground="White" BorderThickness="0" FontSize="14" Padding="10,8"
-                                IsEnabled="{Binding CurrentStep.HasVideo, FallbackValue=False}">
-                            <Button.Resources>
-                                <Style TargetType="Border">
-                                    <Setter Property="CornerRadius" Value="5"/>
-                                </Style>
-                            </Button.Resources>
-                        </Button>
                     </Border>
 
                     <ListView ItemsSource="{Binding DeviceList}" Background="Transparent" BorderThickness="0" Margin="5">

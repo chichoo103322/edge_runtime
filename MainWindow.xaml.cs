@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 
 namespace edge_runtime
@@ -347,26 +348,29 @@ namespace edge_runtime
              }
          }
 
-        // [新增] 打开视频播放窗口
-        private void OnWatchVideo_Click(object sender, RoutedEventArgs e)
+        // [新增] 打开步骤关联的视频播放窗口（通过步骤卡片上的按钮点击）
+        private void OnStepVideo_Click(object sender, RoutedEventArgs e)
         {
-            if (CurrentStep == null || string.IsNullOrEmpty(CurrentStep.VideoPath))
+            if (sender is Button button && button.Tag is ProcessStateViewModel step)
             {
-                MessageBox.Show("当前步骤没有关联的视频");
-                return;
+                if (string.IsNullOrEmpty(step.VideoPath))
+                {
+                    MessageBox.Show("该步骤没有关联的视频");
+                    return;
+                }
+
+                if (!File.Exists(step.VideoPath))
+                {
+                    MessageBox.Show($"视频文件不存在: {step.VideoPath}");
+                    return;
+                }
+
+                // 设置视频源
+                StandardPlayer.Source = new Uri(step.VideoPath, UriKind.Absolute);
+
+                // 打开 Popup
+                VideoPopup.IsOpen = true;
             }
-
-            if (!File.Exists(CurrentStep.VideoPath))
-            {
-                MessageBox.Show($"视频文件不存在: {CurrentStep.VideoPath}");
-                return;
-            }
-
-            // 设置视频源
-            StandardPlayer.Source = new Uri(CurrentStep.VideoPath, UriKind.Absolute);
-
-            // 打开 Popup
-            VideoPopup.IsOpen = true;
         }
 
         // [新增] 关闭视频播放窗口
