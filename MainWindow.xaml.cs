@@ -173,11 +173,11 @@ namespace edge_runtime
                 // 初始化日志服务
                 InitializeLogService();
 
-                // 1. 先检测设备状态
-                CheckAllDevicesStatus();
-
-                // 2. 再启动主流程 (防止占用冲突，实际工程中最好用单例管理相机)
+                // 1. 先启动主流程（优先占用相机）
                 StartMonitoringLoop();
+
+                // 2. 延迟后再检测设备状态（等待相机初始化）
+                Task.Delay(1500).ContinueWith(_ => CheckAllDevicesStatus());
             }
             catch (Exception ex)
             {
@@ -279,21 +279,20 @@ namespace edge_runtime
 
             Task.Run(() =>
             {
-                VideoCapture capture = null;
                 try
                 {
-                    capture = new VideoCapture(0);
-                    capture.Set(VideoCaptureProperties.BufferSize, 1);
+                    _capture = new VideoCapture(0);
+                    _capture.Set(VideoCaptureProperties.BufferSize, 1);
 
                     int retries = 0;
                     const int maxRetries = 10;
-                    while (!capture.IsOpened() && retries < maxRetries && !token.IsCancellationRequested)
+                    while (!_capture.IsOpened() && retries < maxRetries && !token.IsCancellationRequested)
                     {
                         retries++;
                         Thread.Sleep(100);
                     }
 
-                    if (!capture.IsOpened())
+                    if (!_capture.IsOpened())
                     {
                         Dispatcher.Invoke(() => MessageBox.Show("无法打开主摄像头 (ID: 0)，请检查相机是否被占用或掉线"));
                         return;
@@ -303,7 +302,7 @@ namespace edge_runtime
                     {
                         while (!token.IsCancellationRequested)
                         {
-                            if (!capture.Read(frame) || frame.Empty())
+                            if (!_capture.Read(frame) || frame.Empty())
                             {
                                 Thread.Sleep(10);
                                 continue;
@@ -335,8 +334,9 @@ namespace edge_runtime
                 }
                 finally
                 {
-                    capture?.Release();
-                    capture?.Dispose();
+                    _capture?.Release();
+                    _capture?.Dispose();
+                    _capture = null;
                     
                     // 清理 Bitmap 缓冲区
                     _reusableBitmap = null;
