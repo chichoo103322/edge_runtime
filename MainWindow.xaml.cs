@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace edge_runtime
 {
@@ -64,10 +65,15 @@ namespace edge_runtime
         private Dictionary<int, DateTime> _stepLastDetectTime = new Dictionary<int, DateTime>();
         private const int DETECTION_TIMEOUT_SECONDS = 10;
 
+        // 内存优化：复用 WriteableBitmap 缓冲区，避免频繁创建
+        private WriteableBitmap _reusableBitmap;
+        private readonly object _bitmapLock = new object();
+
         // 颜色定义
         private readonly Brush COLOR_PENDING = new SolidColorBrush(Color.FromRgb(80, 80, 80));
         private readonly Brush COLOR_RUNNING = new SolidColorBrush(Color.FromRgb(52, 152, 219));
         private readonly Brush COLOR_SUCCESS = new SolidColorBrush(Color.FromRgb(39, 174, 96));
+        private readonly Brush COLOR_ERROR = new SolidColorBrush(Color.FromRgb(239, 83, 80)); // 红色错误
         private readonly Brush BORDER_HIGHLIGHT = Brushes.Yellow;
 
         // 设备状态颜色
@@ -273,7 +279,7 @@ namespace edge_runtime
 
             Task.Run(() =>
             {
-                VideoCapture capture = null; // 局部变量
+                VideoCapture capture = null;
                 try
                 {
                     capture = new VideoCapture(0);
@@ -303,7 +309,17 @@ namespace edge_runtime
                                 continue;
                             }
 
-                            var bitmap = frame.Clone().ToBitmapSource();
+                            // 初始化 Bitmap 缓冲区（仅第一次）
+                            if (_reusableBitmap == null)
+                            {
+                                Dispatcher.Invoke(() =>
+                                {
+                                    InitializeBitmapBuffer(frame.Width, frame.Height);
+                                });
+                            }
+
+                            // 优化：直接用 ToBitmapSource 而不创建副本
+                            var bitmap = frame.ToBitmapSource();
                             bitmap.Freeze();
                             Dispatcher.Invoke(() => VideoFeed.Source = bitmap);
 
@@ -321,6 +337,9 @@ namespace edge_runtime
                 {
                     capture?.Release();
                     capture?.Dispose();
+                    
+                    // 清理 Bitmap 缓冲区
+                    _reusableBitmap = null;
                 }
             }, token);
         }
@@ -347,6 +366,11 @@ namespace edge_runtime
                 Thread.Sleep(1000);
                 ResetUI();
                 _currentStepIndex = 0;
+
+                // 强制垃圾回收，清理上一轮产品的内存
+                GC.Collect(0, GCCollectionMode.Optimized);
+                GC.WaitForPendingFinalizers();
+
                 return;
             }
 
@@ -384,7 +408,7 @@ namespace edge_runtime
             {
                 Dispatcher.Invoke(() =>
                 {
-                    currentStep.Background = new SolidColorBrush(Color.FromRgb(239, 83, 80)); // 红色
+                    currentStep.Background = COLOR_ERROR;
                     currentStep.BorderColor = Brushes.Transparent;
                 });
 
@@ -405,7 +429,7 @@ namespace edge_runtime
             {
                 Dispatcher.Invoke(() =>
                 {
-                    currentStep.Background = new SolidColorBrush(Color.FromRgb(239, 83, 80)); // 红色
+                    currentStep.Background = COLOR_ERROR;
                     currentStep.BorderColor = Brushes.Transparent;
                 });
 
@@ -476,6 +500,20 @@ namespace edge_runtime
             catch (Exception ex)
             {
                 MessageBox.Show($"初始化日志服务失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 初始化可复用的 Bitmap 缓冲区
+        /// </summary>
+        private void InitializeBitmapBuffer(int width, int height)
+        {
+            if (_reusableBitmap == null)
+            {
+                _reusableBitmap = new System.Windows.Media.Imaging.WriteableBitmap(
+                    width, height, 96, 96, 
+                    System.Windows.Media.PixelFormats.Bgr24, null);
+                _reusableBitmap.Freeze();
             }
         }
 
