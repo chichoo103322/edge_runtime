@@ -2,28 +2,7 @@
 
 namespace edge_runtime
 {
-    // 对应 JSON 的根节点
-    public class WorkflowStructure
-    {
-        public List<ActionStep> Actions { get; set; } = new List<ActionStep>();
-    }
-
-    // 对应 Actions 列表里的每一项
-    public class ActionStep
-    {
-        public string Id { get; set; }
-        public string Name { get; set; }
-        public string StationName { get; set; }
-        public List<StateStep> States { get; set; } = new List<StateStep>();
-    }
-
-    // 对应 States 列表里的每一项
-    public class StateStep
-    {
-        public string Id { get; set; }
-        public string Name { get; set; }
-        public string SelectedLabel { get; set; }
-        public double Threshold { get; set; }
-        public string CameraDevice { get; set; }
-    }
+    // 已移除与 ProcessViewModels.cs 冲突的重复 ViewModel 定义。
+    // 请使用 `ProcessViewModels.cs` 中的 `ProcessStateViewModel` 和 `ProcessActionViewModel`。
+    // Workflow 相关模型已放在 `WorkflowStructure.cs`，此文件保留为空以避免重复定义。
 }

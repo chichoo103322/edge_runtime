@@ -19,9 +19,15 @@
             <Border Grid.Column="0" BorderBrush="#1B2B4A" BorderThickness="2" Margin="5" Background="Black">
                 <Grid>
                     <Image x:Name="VideoFeed" Stretch="Uniform" />
-                    <StackPanel VerticalAlignment="Top" HorizontalAlignment="Left" Margin="10">
-                        <Border Background="#CC000000" Padding="10" CornerRadius="5">
-                            <TextBlock x:Name="TxtCurrentStep" Text="等待加载流程..." Foreground="#00FF00" FontSize="20" FontWeight="Bold"/>
+                    <StackPanel VerticalAlignment="Top" HorizontalAlignment="Left" Margin="15">
+                        <Border Background="#AA000000" CornerRadius="5" Padding="10,5" Margin="0,0,0,10">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="📍 工位: " Foreground="#AAAAAA" FontSize="16"/>
+                                <TextBlock Text="{Binding CurrentStationName}" Foreground="#00CCFF" FontSize="18" FontWeight="Bold"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Background="#AA000000" Padding="10,5" CornerRadius="5">
+                            <TextBlock x:Name="TxtCurrentStep" Text="等待加载..." Foreground="#00FF00" FontSize="20" FontWeight="Bold"/>
                         </Border>
                     </StackPanel>
                 </Grid>
@@ -32,10 +38,9 @@
                     <Grid DockPanel.Dock="Top" Background="#1B2B4A" Height="60">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0">
                             <TextBlock Text="实时工艺看板" FontSize="24" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
-
                             <Button x:Name="BtnLoad" Content="📂 导入流程 JSON" Click="BtnLoadProject_Click" 
                                     Margin="30,0,0,0" Padding="20,8" Background="#2980b9" Foreground="White" 
-                                    BorderThickness="0" FontSize="16" Cursor="Hand">
+                                    BorderThickness="0" FontSize="16">
                                 <Button.Resources>
                                     <Style TargetType="Border">
                                         <Setter Property="CornerRadius" Value="5"/>
@@ -44,22 +49,19 @@
                             </Button>
                         </StackPanel>
                     </Grid>
-
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="10">
+                    <Viewbox Stretch="Uniform" Margin="10" VerticalAlignment="Top">
                         <ItemsControl ItemsSource="{Binding ActionColumns}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <StackPanel Orientation="Horizontal"/>
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
-
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border BorderBrush="#445577" BorderThickness="1" Margin="10" Padding="15" Width="260" Background="#0F1F3D" CornerRadius="8">
                                         <StackPanel>
                                             <TextBlock Text="{Binding Name}" FontSize="24" FontWeight="Bold" 
                                                        HorizontalAlignment="Center" Margin="0,0,0,20" Foreground="#66AAFF"/>
-
                                             <ItemsControl ItemsSource="{Binding States}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
@@ -82,13 +84,61 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                    </ScrollViewer>
+                    </Viewbox>
                 </DockPanel>
             </Border>
         </Grid>
 
-        <Border Grid.Row="1" BorderBrush="#1B2B4A" BorderThickness="2" Margin="5" Background="#0A1633">
-            <TextBlock Text="系统日志区" Foreground="Gray" Margin="10"/>
-        </Border>
+        <Grid Grid.Row="1" Margin="5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="350"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" BorderBrush="#1B2B4A" BorderThickness="2" Background="#0A1633" Margin="0,0,5,0">
+                <DockPanel>
+                    <TextBlock Text="系统运行日志" Foreground="#AAAAAA" Margin="10" DockPanel.Dock="Top"/>
+                    <TextBlock Text="> System initialized..." Foreground="Gray" Margin="10,0"/>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="1" BorderBrush="#1B2B4A" BorderThickness="2" Background="#0A1633">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Background="#1B2B4A" Padding="10">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="📷 在线设备管理" FontWeight="Bold" Foreground="White" FontSize="16"/>
+                            <TextBlock Text=" (自动检测)" Foreground="Gray" FontSize="12" VerticalAlignment="Bottom" Margin="5,0,0,1"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ListView ItemsSource="{Binding DeviceList}" Background="Transparent" BorderThickness="0" Margin="5">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#112233" CornerRadius="5" Margin="0,2" Padding="10">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0" Orientation="Vertical">
+                                            <TextBlock Text="{Binding DeviceName}" Foreground="White" FontWeight="Bold" FontSize="14"/>
+                                            <TextBlock Text="{Binding DeviceId, StringFormat='ID: {0}'}" Foreground="Gray" FontSize="10"/>
+                                        </StackPanel>
+
+                                        <Border Grid.Column="1" Background="#22000000" CornerRadius="10" Padding="8,4">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Ellipse Width="10" Height="10" Fill="{Binding StatusColor}" Margin="0,0,5,0"/>
+                                                <TextBlock Text="{Binding Status}" Foreground="{Binding StatusColor}" FontSize="12" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </DockPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
