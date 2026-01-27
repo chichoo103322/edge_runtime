@@ -10,6 +10,71 @@
             <RowDefinition Height="1*"/>
         </Grid.RowDefinitions>
 
+        <!-- 隐藏的视频播放器，用于播放标准作业指导 -->
+        <Popup x:Name="VideoPopup" Placement="Center" AllowsTransparency="False" 
+               PopupAnimation="Fade" StaysOpen="True" IsOpen="False">
+            <Border Background="Black" BorderBrush="#1B2B4A" BorderThickness="2" CornerRadius="10" Width="800" Height="600">
+                <Grid Background="Black">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="#1B2B4A" Padding="10" CornerRadius="10,10,0,0">
+                        <Grid>
+                            <TextBlock Text="作业指导视频" Foreground="White" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+                            <Button HorizontalAlignment="Right" Content="✕" Click="OnCloseVideo_Click" 
+                                    Background="#E74C3C" Foreground="White" BorderThickness="0" 
+                                    Padding="8" FontSize="14" Width="35" Height="35">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="3"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1" Background="Black" BorderBrush="#1B2B4A" BorderThickness="0">
+                        <MediaElement x:Name="StandardPlayer" Stretch="Uniform" LoadedBehavior="Manual"/>
+                    </Border>
+
+                    <Border Grid.Row="2" Background="#1B2B4A" Padding="10" CornerRadius="0,0,10,10">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button x:Name="BtnPlayVideo" Content="▶ 播放" Click="OnPlayVideo_Click" 
+                                    Background="#27AE60" Foreground="White" BorderThickness="0" 
+                                    Padding="12,6" FontSize="13" Margin="5">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="3"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
+                            <Button x:Name="BtnPauseVideo" Content="⏸ 暂停" Click="OnPauseVideo_Click" 
+                                    Background="#F39C12" Foreground="White" BorderThickness="0" 
+                                    Padding="12,6" FontSize="13" Margin="5">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="3"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
+                            <Button Content="⏹ 停止" Click="OnStopVideo_Click" 
+                                    Background="#E74C3C" Foreground="White" BorderThickness="0" 
+                                    Padding="12,6" FontSize="13" Margin="5">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="3"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+        </Popup>
+
         <Grid Grid.Row="0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="1*"/>
@@ -104,11 +169,23 @@
 
             <Border Grid.Column="1" BorderBrush="#1B2B4A" BorderThickness="2" Background="#0A1633">
                 <DockPanel>
-                    <Border DockPanel.Dock="Top" Background="#1B2B4A" Padding="10">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="📷 在线设备管理" FontWeight="Bold" Foreground="White" FontSize="16"/>
-                            <TextBlock Text=" (自动检测)" Foreground="Gray" FontSize="12" VerticalAlignment="Bottom" Margin="5,0,0,1"/>
+                    <Border DockPanel.Dock="Top" Background="#1B2B4A" Padding="10" Margin="0,0,0,5">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="📷 在线设备管理" FontWeight="Bold" Foreground="White" FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text=" (自动检测)" Foreground="Gray" FontSize="12" VerticalAlignment="Center" Margin="5,0,0,0"/>
                         </StackPanel>
+                    </Border>
+
+                    <Border DockPanel.Dock="Top" Background="#1B5E7E" Padding="10" Margin="0,0,0,5" CornerRadius="5">
+                        <Button x:Name="BtnWatchVideo" Content="🎬 查看作业指导视频" Click="OnWatchVideo_Click" 
+                                Background="#3498db" Foreground="White" BorderThickness="0" FontSize="14" Padding="10,8"
+                                IsEnabled="{Binding CurrentStep.HasVideo, FallbackValue=False}">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="5"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
                     </Border>
 
                     <ListView ItemsSource="{Binding DeviceList}" Background="Transparent" BorderThickness="0" Margin="5">

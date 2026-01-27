@@ -6,6 +6,7 @@ namespace edge_runtime
     public class WorkflowStructure
     {
         public List<ActionStep> Actions { get; set; } = new List<ActionStep>();
+        public string ModelPath { get; set; }
     }
 
     // 对应 Actions 列表里的每一项
@@ -27,5 +28,8 @@ namespace edge_runtime
 
         // 新增：从 JSON 中读取相机字段（例如 "cameraDevice"）
         public string CameraDevice { get; set; }
+
+        // 新增：标准作业指导视频路径
+        public string StandardVideoPath { get; set; }
     }
 }

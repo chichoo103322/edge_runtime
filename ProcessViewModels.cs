@@ -29,6 +29,22 @@ namespace edge_runtime
             set { _cameraId = value; OnPropertyChanged(); }
         }
 
+        // 新增：该步骤的标准作业指导视频路径
+        private string _videoPath = string.Empty;
+        public string VideoPath
+        {
+            get => _videoPath;
+            set { _videoPath = value; OnPropertyChanged(); }
+        }
+
+        // 新增：是否有视频（用于控制按钮是否可用）
+        private bool _hasVideo = false;
+        public bool HasVideo
+        {
+            get => _hasVideo;
+            set { _hasVideo = value; OnPropertyChanged(); }
+        }
+
         private Brush _background = new SolidColorBrush(Color.FromRgb(80, 80, 80)); // 默认深灰色
         public Brush Background
         {

@@ -28,6 +28,14 @@ namespace edge_runtime
         private List<ProcessStateViewModel> _executionQueue = new List<ProcessStateViewModel>();
         private int _currentStepIndex = 0;
 
+        // [新增] 当前步骤绑定用
+        private ProcessStateViewModel _currentStep;
+        public ProcessStateViewModel CurrentStep
+        {
+            get => _currentStep;
+            set { _currentStep = value; OnPropertyChanged(); }
+        }
+
         private string _currentStationName = "未知工位";
         public string CurrentStationName
         {
@@ -100,8 +108,12 @@ namespace edge_runtime
                                 Threshold = stateData.Threshold,
                                 Background = COLOR_PENDING,
                                 StationName = actionData.StationName ?? "未配置",
-                                CameraId = stateData.CameraDevice // 记录该步骤需要的相机
+                                CameraId = stateData.CameraDevice, // 记录该步骤需要的相机
+                                VideoPath = stateData.StandardVideoPath // [新增] 记录标准作业指导视频路径
                             };
+
+                            // [新增] 根据 VideoPath 是否为空设置 HasVideo
+                            stateVM.HasVideo = !string.IsNullOrEmpty(stateVM.VideoPath);
 
                             // 收集相机ID
                             if (!string.IsNullOrEmpty(stateVM.CameraId))
@@ -132,7 +144,8 @@ namespace edge_runtime
                 if (_executionQueue.Count > 0)
                     CurrentStationName = _executionQueue[0].StationName;
 
-                LoadAiModel();
+                // [修改] 从 JSON 中读取动态的 ModelPath
+                LoadAiModel(workflow.ModelPath);
 
                 // 1. 先检测设备状态
                 CheckAllDevicesStatus();
@@ -266,6 +279,9 @@ namespace edge_runtime
             {
                 TxtCurrentStep.Text = $"当前步骤: {currentStep.Name}";
 
+                // [新增] 更新 CurrentStep 绑定，用于按钮的 IsEnabled 状态
+                CurrentStep = currentStep;
+
                 if (CurrentStationName != currentStep.StationName)
                 {
                     CurrentStationName = currentStep.StationName;
@@ -304,14 +320,79 @@ namespace edge_runtime
             }
         }
 
-        private void LoadAiModel()
+        private void LoadAiModel(string modelPath)
         {
-            string modelPath = "model.onnx";
-            if (File.Exists(modelPath))
+            // [修改] 移除硬编码，直接使用传入的 modelPath 参数
+            if (string.IsNullOrEmpty(modelPath))
+            {
+                Dispatcher.Invoke(() => MessageBox.Show("模型路径为空，将跳过 AI 模型加载"));
+                return;
+            }
+
+            if (!File.Exists(modelPath))
+            {
+                Dispatcher.Invoke(() => MessageBox.Show($"模型文件不存在: {modelPath}"));
+                return;
+            }
+
+            try
             {
                 var labels = OnnxHelper.ReadLabelsFromModel(modelPath);
                 _aiService = new OnnxInferenceService(modelPath, labels);
+                Dispatcher.Invoke(() => MessageBox.Show($"AI 模型已加载: {modelPath}"));
             }
+            catch (Exception ex)
+             {
+                 Dispatcher.Invoke(() => MessageBox.Show($"加载 AI 模型失败: {ex.Message}"));
+             }
+         }
+
+        // [新增] 打开视频播放窗口
+        private void OnWatchVideo_Click(object sender, RoutedEventArgs e)
+        {
+            if (CurrentStep == null || string.IsNullOrEmpty(CurrentStep.VideoPath))
+            {
+                MessageBox.Show("当前步骤没有关联的视频");
+                return;
+            }
+
+            if (!File.Exists(CurrentStep.VideoPath))
+            {
+                MessageBox.Show($"视频文件不存在: {CurrentStep.VideoPath}");
+                return;
+            }
+
+            // 设置视频源
+            StandardPlayer.Source = new Uri(CurrentStep.VideoPath, UriKind.Absolute);
+
+            // 打开 Popup
+            VideoPopup.IsOpen = true;
+        }
+
+        // [新增] 关闭视频播放窗口
+        private void OnCloseVideo_Click(object sender, RoutedEventArgs e)
+        {
+            StandardPlayer.Stop();
+            StandardPlayer.Source = null;
+            VideoPopup.IsOpen = false;
+        }
+
+        // [新增] 播放视频
+        private void OnPlayVideo_Click(object sender, RoutedEventArgs e)
+        {
+            StandardPlayer.Play();
+        }
+
+        // [新增] 暂停视频
+        private void OnPauseVideo_Click(object sender, RoutedEventArgs e)
+        {
+            StandardPlayer.Pause();
+        }
+
+        // [新增] 停止视频
+        private void OnStopVideo_Click(object sender, RoutedEventArgs e)
+        {
+            StandardPlayer.Stop();
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
