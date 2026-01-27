@@ -47,6 +47,17 @@ namespace edge_runtime
         private VideoCapture _capture;
         private CancellationTokenSource _cts;
         private OnnxInferenceService _aiService;
+        private LogService _logService;
+
+        // 错误动作定义（工业级质量控制）
+        private static readonly HashSet<string> ERROR_ACTIONS = new HashSet<string>
+        {
+            "UsingPhone",
+            "WrongHand",
+            "NotWearing",
+            "Distracted",
+            "IncorrectPosture"
+        };
 
         // 颜色定义
         private readonly Brush COLOR_PENDING = new SolidColorBrush(Color.FromRgb(80, 80, 80));
@@ -147,6 +158,9 @@ namespace edge_runtime
 
                 // [修改] 从 JSON 中读取动态的 ModelPath
                 LoadAiModel(workflow.ModelPath);
+
+                // 初始化日志服务
+                InitializeLogService();
 
                 // 1. 先检测设备状态
                 CheckAllDevicesStatus();
@@ -254,25 +268,21 @@ namespace edge_runtime
 
             Task.Run(() =>
             {
-                // 这里暂时默认打开索引 0 的相机作为主视频流
-                // 未来可以根据 CurrentStep.CameraId 动态切换 _capture
+                VideoCapture capture = null; // 局部变量
                 try
                 {
-                    _capture = new VideoCapture(0);
+                    capture = new VideoCapture(0);
+                    capture.Set(VideoCaptureProperties.BufferSize, 1);
 
-                    // 设置缓冲区大小以减少延迟
-                    _capture.Set(VideoCaptureProperties.BufferSize, 1);
-
-                    // 添加超时检查
                     int retries = 0;
                     const int maxRetries = 10;
-                    while (!_capture.IsOpened() && retries < maxRetries && !token.IsCancellationRequested)
+                    while (!capture.IsOpened() && retries < maxRetries && !token.IsCancellationRequested)
                     {
                         retries++;
                         Thread.Sleep(100);
                     }
 
-                    if (!_capture.IsOpened())
+                    if (!capture.IsOpened())
                     {
                         Dispatcher.Invoke(() => MessageBox.Show("无法打开主摄像头 (ID: 0)，请检查相机是否被占用或掉线"));
                         return;
@@ -282,7 +292,7 @@ namespace edge_runtime
                     {
                         while (!token.IsCancellationRequested)
                         {
-                            if (!_capture.Read(frame) || frame.Empty())
+                            if (!capture.Read(frame) || frame.Empty())
                             {
                                 Thread.Sleep(10);
                                 continue;
@@ -304,27 +314,36 @@ namespace edge_runtime
                 }
                 finally
                 {
-                    _capture?.Release();
-                    _capture?.Dispose();
+                    capture?.Release();
+                    capture?.Dispose();
                 }
             }, token);
         }
 
         private void ProcessFlowLogic(Mat frame)
         {
+            // 前提：如果 AI 服务未加载，不做任何处理
+            if (_aiService == null)
+            {
+                return;
+            }
+
+            // 流程已完成，进入下一轮
             if (_currentStepIndex >= _executionQueue.Count)
             {
-                Dispatcher.Invoke(() => TxtCurrentStep.Text = "所有流程已完成！");
+                Dispatcher.Invoke(() => TxtCurrentStep.Text = "所有流程已完成，准备下一轮...");
+                Thread.Sleep(1000);
+                ResetUI();
+                _currentStepIndex = 0;
                 return;
             }
 
             var currentStep = _executionQueue[_currentStepIndex];
 
+            // 更新 UI：标记当前步骤为运行中
             Dispatcher.Invoke(() =>
             {
                 TxtCurrentStep.Text = $"当前步骤: {currentStep.Name}";
-
-                // [新增] 更新 CurrentStep 绑定，用于按钮的 IsEnabled 状态
                 CurrentStep = currentStep;
 
                 if (CurrentStationName != currentStep.StationName)
@@ -339,29 +358,81 @@ namespace edge_runtime
                 }
             });
 
-            bool isPassed = false;
-            if (_aiService != null && !string.IsNullOrEmpty(currentStep.TargetLabel))
+            // 获取 AI 识别结果
+            var result = _aiService.Predict(frame);
+
+            // 情况 B：检测到错误动作
+            if (ERROR_ACTIONS.Contains(result.Label))
             {
-                var result = _aiService.Predict(frame);
-                if (result.Label == currentStep.TargetLabel && result.Confidence >= currentStep.Threshold)
+                Dispatcher.Invoke(() =>
                 {
-                    isPassed = true;
-                }
-            }
-            else
-            {
-                Thread.Sleep(500);
-                isPassed = true;
+                    currentStep.Background = new SolidColorBrush(Color.FromRgb(239, 83, 80)); // 红色
+                    currentStep.BorderColor = Brushes.Transparent;
+                });
+
+                // 保存错误图片并记录到数据库
+                string imagePath = _logService?.SaveErrorImage(frame, currentStep.Name);
+                _logService?.LogResult(
+                    currentStep.Name,
+                    isSuccess: false,
+                    msg: $"检测到错误行为: {result.Label} (置信度: {result.Confidence:P2})",
+                    imagePath: imagePath
+                );
+
+                return;
             }
 
-            if (isPassed)
+            // 情况 A：正确行为
+            if (result.Label == currentStep.TargetLabel && result.Confidence >= currentStep.Threshold)
             {
                 Dispatcher.Invoke(() =>
                 {
                     currentStep.Background = COLOR_SUCCESS;
                     currentStep.BorderColor = Brushes.Transparent;
                 });
+
+                // 记录成功日志
+                _logService?.LogResult(
+                    currentStep.Name,
+                    isSuccess: true,
+                    msg: $"通过检测: {result.Label} (置信度: {result.Confidence:P2})"
+                );
+
                 _currentStepIndex++;
+                return;
+            }
+
+            // 情况 C：无操作/等待（置信度低或检测不到目标标签）
+            // 保持当前状态，不做任何改变，继续等待
+        }
+
+        private void ResetUI()
+        {
+            Dispatcher.Invoke(() =>
+            {
+                foreach (var column in ActionColumns)
+                {
+                    foreach (var state in column.States)
+                    {
+                        state.Background = COLOR_PENDING;
+                        state.BorderColor = Brushes.Transparent;
+                    }
+                }
+            });
+        }
+
+        private void InitializeLogService()
+        {
+            try
+            {
+                // 从 App.xaml.cs 或配置文件中读取数据库连接字符串
+                // 示例连接字符串，请根据实际情况修改
+                string connectionString = "Server=localhost;Database=edge_runtime;User=root;Password=your_password;";
+                _logService = new LogService(connectionString, "ErrorLogs");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"初始化日志服务失败: {ex.Message}");
             }
         }
 
@@ -460,6 +531,7 @@ namespace edge_runtime
         {
             _cts?.Cancel();
             _capture?.Dispose();
+            _logService = null;
             base.OnClosed(e);
         }
     }
