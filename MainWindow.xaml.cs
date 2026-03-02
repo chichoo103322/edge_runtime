@@ -50,6 +50,10 @@ namespace edge_runtime
         private OnnxInferenceService _aiService;
         private LogService _logService;
 
+        // 当前正在使用的相机信息（用于设备状态同步）
+        private string _currentCameraId = null;
+        private int? _currentCameraIndex = null;
+
         // 错误动作定义（工业级质量控制）
         private static readonly HashSet<string> ERROR_ACTIONS = new HashSet<string>
         {
@@ -167,6 +171,20 @@ namespace edge_runtime
                 if (_executionQueue.Count > 0)
                     CurrentStationName = _executionQueue[0].StationName;
 
+                // 选择首个相机作为默认主相机（如果有指定）
+                string primaryCam = null;
+                foreach (var id in uniqueCameraIds)
+                {
+                    primaryCam = id;
+                    break;
+                }
+                if (!string.IsNullOrEmpty(primaryCam))
+                {
+                    _currentCameraId = primaryCam;
+                    // 解析为索引（如果是数字，会返回数字；否则尝试按名称查找）
+                    _currentCameraIndex = CameraHelper.GetCameraIndexByName(_currentCameraId);
+                }
+
                 // [修改] 从 JSON 中读取动态的 ModelPath
                 LoadAiModel(workflow.ModelPath);
 
@@ -192,60 +210,56 @@ namespace edge_runtime
             {
                 foreach (var device in DeviceList)
                 {
-                    // 更新为检测中
-                    Dispatcher.Invoke(() => {
-                        device.Status = "正在连接...";
-                        device.StatusColor = STATUS_CHECKING;
-                    });
+                    Dispatcher.Invoke(() => { device.Status = "正在连接..."; device.StatusColor = STATUS_CHECKING; });
 
                     bool isOnline = false;
                     try
                     {
-                        // 尝试解析 ID (假设是数字索引 "0", "1")
+                        // 如果 DeviceId 是数字索引
                         if (int.TryParse(device.DeviceId, out int camIndex))
                         {
-                            // 尝试打开相机，添加超时控制
-                            var capTask = Task.Run(() =>
+                            using (var tempCap = new VideoCapture(camIndex))
                             {
-                                try
-                                {
-                                    using (var tempCap = new VideoCapture(camIndex))
-                                    {
-                                        // 设置打开超时
-                                        tempCap.Set(VideoCaptureProperties.BufferSize, 1);
-                                        if (tempCap.IsOpened())
-                                        {
-                                            return true;
-                                        }
-                                    }
-                                }
-                                catch { }
-                                return false;
-                            });
-
-                            // 等待最多 2 秒
-                            if (capTask.Wait(TimeSpan.FromSeconds(2)))
-                            {
-                                isOnline = capTask.Result;
-                            }
-                            else
-                            {
-                                isOnline = false; // 超时视为离线
+                                tempCap.Set(VideoCaptureProperties.BufferSize, 1);
+                                isOnline = tempCap.IsOpened();
                             }
                         }
                         else
                         {
-                            // 如果ID是 RTSP 流地址或其他字符串，这里可以加其他检测逻辑
-                            isOnline = false; // 暂时只支持数字索引
+                            // 先尝试用 DirectShow 名称直接打开
+                            try
+                            {
+                                using (var tempCap = new VideoCapture($"video={device.DeviceId}", VideoCaptureAPIs.DSHOW))
+                                {
+                                    tempCap.Set(VideoCaptureProperties.BufferSize, 1);
+                                    if (tempCap.IsOpened()) isOnline = true;
+                                }
+                            }
+                            catch { isOnline = false; }
+
+                            // 如果按名称打开失败，尝试通过 CameraHelper 显射到索引再打开
+                            if (!isOnline)
+                            {
+                                int mappedIndex = CameraHelper.GetCameraIndexByName(device.DeviceId);
+                                if (mappedIndex >= 0)
+                                {
+                                    try
+                                    {
+                                        using (var tempCap = new VideoCapture(mappedIndex))
+                                        {
+                                            tempCap.Set(VideoCaptureProperties.BufferSize, 1);
+                                            if (tempCap.IsOpened()) isOnline = true;
+                                        }
+                                    }
+                                    catch { isOnline = false; }
+                                }
+                            }
                         }
                     }
-                    catch
-                    {
-                        isOnline = false;
-                    }
+                    catch { isOnline = false; }
 
-                    // 更新结果
-                    Dispatcher.Invoke(() => {
+                    Dispatcher.Invoke(() =>
+                    {
                         if (isOnline)
                         {
                             device.Status = "在线";
@@ -253,9 +267,14 @@ namespace edge_runtime
                         }
                         else
                         {
-                            // 特殊情况：如果是当前正在使用的主相机（比如索引0），
-                            // VideoCapture 可能会因为被占用而打不开，这里做个简单兼容
-                            if (device.DeviceId == "0" && _capture != null && _capture.IsOpened())
+                            // 如果当前主相机就是此设备（匹配名称或索引），并且 _capture 已打开，则标记运行中
+                            bool isCurrent = false;
+                            if (!string.IsNullOrEmpty(_currentCameraId) && device.DeviceId.Equals(_currentCameraId, StringComparison.OrdinalIgnoreCase))
+                                isCurrent = (_capture != null && _capture.IsOpened());
+                            if (!isCurrent && int.TryParse(device.DeviceId, out int idx) && _currentCameraIndex.HasValue && idx == _currentCameraIndex.Value)
+                                isCurrent = (_capture != null && _capture.IsOpened());
+
+                            if (isCurrent)
                             {
                                 device.Status = "运行中";
                                 device.StatusColor = STATUS_ONLINE;
@@ -281,7 +300,32 @@ namespace edge_runtime
             {
                 try
                 {
-                    _capture = new VideoCapture(0);
+                    // 优先按名称打开（如果有指定名称）
+                    bool opened = false;
+                    if (!string.IsNullOrEmpty(_currentCameraId))
+                    {
+                        try
+                        {
+                            // 使用 DirectShow 打开指定名字的设备
+                            _capture = new VideoCapture($"video={_currentCameraId}", VideoCaptureAPIs.DSHOW);
+                            if (_capture?.IsOpened() == true) opened = true;
+                        }
+                        catch { opened = false; }
+                    }
+
+                    // 如果未打开，尝试用映射到的索引打开
+                    if (!opened && _currentCameraIndex.HasValue)
+                    {
+                        _capture = new VideoCapture(_currentCameraIndex.Value);
+                        if (_capture?.IsOpened() == true) opened = true;
+                    }
+
+                    // 最后退回到 0
+                    if (!opened)
+                    {
+                        _capture = new VideoCapture(0);
+                    }
+
                     _capture.Set(VideoCaptureProperties.BufferSize, 1);
 
                     int retries = 0;
@@ -294,9 +338,12 @@ namespace edge_runtime
 
                     if (!_capture.IsOpened())
                     {
-                        Dispatcher.Invoke(() => MessageBox.Show("无法打开主摄像头 (ID: 0)，请检查相机是否被占用或掉线"));
+                        Dispatcher.Invoke(() => MessageBox.Show("无法打开主摄像头，请检查相机设置"));
                         return;
                     }
+
+                    // 记录当前实际使用的索引（便于状态更新）
+                    try { _currentCameraIndex = _capture.PosMsec; } catch { /* ignore */ }
 
                     using (Mat frame = new Mat())
                     {
