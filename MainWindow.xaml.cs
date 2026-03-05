@@ -194,7 +194,13 @@ namespace edge_runtime
                 {
                     _currentCameraId = primaryCam;
                     // 解析为索引（如果是数字，会返回数字；否则尝试按名称查找）
-                    _currentCameraIndex = CameraHelper.GetCameraIndexByName(_currentCameraId);
+                    // 注意：GetCameraIndexByName 返回 -1 表示未找到，不应该用作相机索引
+                    int mappedIndex = CameraHelper.GetCameraIndexByName(_currentCameraId);
+                    if (mappedIndex >= 0)
+                    {
+                        _currentCameraIndex = mappedIndex;
+                    }
+                    // 如果 mappedIndex 为 -1，则 _currentCameraIndex 保持为 null
                 }
 
                 // [修改] 从 JSON 中读取动态的 ModelPath
@@ -330,16 +336,20 @@ namespace edge_runtime
                     }
 
                     // 如果未打开，尝试用映射到的索引打开
-                    if (!opened && _currentCameraIndex.HasValue)
+                    if (!opened && _currentCameraIndex.HasValue && _currentCameraIndex.Value >= 0)
                     {
                         _capture = new VideoCapture(_currentCameraIndex.Value);
                         if (_capture?.IsOpened() == true) opened = true;
                     }
 
-                    // 最后退回到 0
+                    // 如果指定的相机未能打开，显示错误并返回，不自动回退到默认相机
                     if (!opened)
                     {
-                        _capture = new VideoCapture(0);
+                        Dispatcher.Invoke(() => 
+                            MessageBox.Show($"无法打开指定的摄像头。\n相机ID: {_currentCameraId}\n" +
+                                          $"请检查相机连接或配置。")
+                        );
+                        return;
                     }
 
                     _capture.Set(VideoCaptureProperties.BufferSize, 1);
@@ -357,9 +367,6 @@ namespace edge_runtime
                         Dispatcher.Invoke(() => MessageBox.Show("无法打开主摄像头，请检查相机设置"));
                         return;
                     }
-
-                    // 记录当前实际使用的索引（便于状态更新）
-                    try { _currentCameraIndex = _capture.PosMsec; } catch { /* ignore */ }
 
                     using (Mat frame = new Mat())
                     {

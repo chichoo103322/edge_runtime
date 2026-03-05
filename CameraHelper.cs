@@ -10,22 +10,22 @@ namespace edge_runtime
     /// </summary>
     public class CameraHelper
     {
-        /// <summary>
+    /// <summary>
         /// 根据设备名称获取摄像头索引
         /// </summary>
         /// <param name="deviceName">摄像头设备名称</param>
-        /// <returns>设备索引；如果未找到，返回 0</returns>
+        /// <returns>设备索引；如果未找到，返回 -1</returns>
         public static int GetCameraIndexByName(string deviceName)
         {
             try
             {
                 if (string.IsNullOrEmpty(deviceName))
-                    return 0;
+                    return -1;
 
                 DsDevice[] devices = DsDevice.GetDevicesOfCat(FilterCategory.VideoInputDevice);
 
                 if (devices == null || devices.Length == 0)
-                    return 0;
+                    return -1;
 
                 for (int i = 0; i < devices.Length; i++)
                 {
@@ -35,13 +35,13 @@ namespace edge_runtime
                     }
                 }
 
-                // 未找到匹配的设备，返回默认值 0
-                return 0;
+                // 未找到匹配的设备，返回 -1 表示未找到
+                return -1;
             }
             catch (Exception ex)
             {
                 System.Windows.MessageBox.Show($"获取摄像头列表失败: {ex.Message}");
-                return 0;
+                return -1;
             }
         }
 
