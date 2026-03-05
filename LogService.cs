@@ -7,20 +7,23 @@ namespace edge_runtime
 {
     public class LogService
     {
-        // 数据库连接字符串（请根据实际情况修改）
-        private const string CONNECTION_STRING = "Server=localhost;Database=edge_runtime;User=root;Password=your_password;Charset=utf8mb4;";
-        
         private readonly string _logDirectory;
+        private readonly string _connectionString;
+        private readonly bool _enableDbLogging;
 
         public LogService(string logDirectory = "ErrorLogs")
         {
             _logDirectory = logDirectory;
+            _connectionString = ConfigManager.Instance.GetDatabaseConnectionString();
+            _enableDbLogging = ConfigManager.Instance.IsEnabledDatabaseLogging();
 
             // 创建日志目录（如果不存在）
             if (!Directory.Exists(_logDirectory))
             {
                 Directory.CreateDirectory(_logDirectory);
             }
+
+            UILogManager.Instance.LogInfo($"日志服务已初始化。数据库记录: {(_enableDbLogging ? "启用" : "禁用")}");
         }
 
         /// <summary>
@@ -51,11 +54,14 @@ namespace edge_runtime
                 // 保存图片
                 Cv2.ImWrite(filePath, frame, param);
 
+                UILogManager.Instance.LogInfo($"图片已保存: {filePath} ({status})");
                 return filePath;
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"保存图片失败: {ex.Message}");
+                string errMsg = $"保存图片失败: {ex.Message}";
+                System.Windows.MessageBox.Show(errMsg);
+                UILogManager.Instance.LogError(errMsg);
                 return null;
             }
         }
@@ -68,9 +74,16 @@ namespace edge_runtime
         /// <param name="imagePath">图片路径（可选）</param>
         public void LogToDb(string stepName, string status, string imagePath = null)
         {
+            // 如果禁用了数据库记录，只记录到 UI 日志
+            if (!_enableDbLogging)
+            {
+                UILogManager.Instance.LogInfo($"[{stepName}] {status} {(imagePath ?? "")}");
+                return;
+            }
+
             try
             {
-                using (var connection = new MySqlConnection(CONNECTION_STRING))
+                using (var connection = new MySqlConnection(_connectionString))
                 {
                     connection.Open();
 
@@ -85,12 +98,15 @@ namespace edge_runtime
                         command.Parameters.AddWithValue("@img_path", imagePath ?? string.Empty);
 
                         command.ExecuteNonQuery();
+                        UILogManager.Instance.LogInfo($"数据库记录已保存: [{stepName}] {status}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"数据库记录失败: {ex.Message}");
+                string errMsg = $"数据库记录失败: {ex.Message}";
+                System.Windows.MessageBox.Show(errMsg);
+                UILogManager.Instance.LogError(errMsg);
             }
         }
 

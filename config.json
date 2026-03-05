@@ -1,0 +1,22 @@
+{
+  "Database": {
+    "Server": "localhost",
+    "Port": 3306,
+    "Database": "edge_runtime",
+    "User": "root",
+    "Password": "237569Zy"
+  },
+  "LogSettings": {
+    "LogDirectory": "ErrorLogs",
+    "MaxLogLines": 1000,
+    "EnableDatabaseLogging": true
+  },
+  "CameraSettings": {
+    "DefaultCameraIndex": 0,
+    "ImageResizeWidth": 512,
+    "ImageResizeHeight": 512
+  },
+  "EditorSettings": {
+    "EditorPath": ""
+  }
+}

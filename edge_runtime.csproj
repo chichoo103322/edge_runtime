@@ -17,4 +17,23 @@
     <PackageReference Include="OpenCvSharp4.WpfExtensions" Version="4.11.0.20250507" />
   </ItemGroup>
 
+  <!-- 自动复制 config.json 到输出目录 -->
+  <ItemGroup>
+    <None Update="config.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- 外部编辑器（edge.exe）复制设置：如果机器上存在该路径的 edge.exe，则在构建后复制到输出目录。 -->
+  <PropertyGroup>
+    <!-- 默认外部编辑器路径；你可以按需修改为实际位置或在 CI 中覆盖该属性 -->
+    <ExternalEditorSource>D:\HuaweiMoveData\Users\33169\Desktop\2\bin\Release\net8.0-windows\edge.exe</ExternalEditorSource>
+  </PropertyGroup>
+
+  <Target Name="CopyExternalEditor" AfterTargets="Build">
+    <Message Text="Checking for ExternalEditor at '$(ExternalEditorSource)'" Importance="Low"/>
+    <Copy SourceFiles="$(ExternalEditorSource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(ExternalEditorSource)')" />
+    <Message Text="External editor copied to $(OutputPath)" Importance="Low" Condition="Exists('$(ExternalEditorSource)')" />
+  </Target>
+
 </Project>

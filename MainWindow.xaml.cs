@@ -5,8 +5,11 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Reflection;
+using System.Runtime.Loader;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -89,6 +92,9 @@ namespace edge_runtime
         {
             InitializeComponent();
             DataContext = this;
+            
+            // 初始化 UI 日志系统
+            UILogManager.Instance.LogInfo("应用程序已启动");
         }
 
         private void BtnLoadProject_Click(object sender, RoutedEventArgs e)
@@ -104,11 +110,17 @@ namespace edge_runtime
         {
             try
             {
+                UILogManager.Instance.LogInfo($"开始加载流程文件: {filepath}");
+                
                 string json = File.ReadAllText(filepath);
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                 var workflow = JsonSerializer.Deserialize<WorkflowStructure>(json, options);
 
-                if (workflow == null || workflow.Actions == null) return;
+                if (workflow == null || workflow.Actions == null)
+                {
+                    UILogManager.Instance.LogError("流程文件格式无效");
+                    return;
+                }
 
                 ActionColumns.Clear();
                 _executionQueue.Clear();
@@ -191,6 +203,8 @@ namespace edge_runtime
                 // 初始化日志服务
                 InitializeLogService();
 
+                UILogManager.Instance.LogInfo($"流程加载完成: {_executionQueue.Count} 个步骤, {DeviceList.Count} 个设备");
+
                 // 1. 先启动主流程（优先占用相机）
                 StartMonitoringLoop();
 
@@ -199,7 +213,9 @@ namespace edge_runtime
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"加载失败: {ex.Message}");
+                string errMsg = $"加载失败: {ex.Message}";
+                MessageBox.Show(errMsg);
+                UILogManager.Instance.LogError(errMsg);
             }
         }
 
@@ -237,7 +253,7 @@ namespace edge_runtime
                             }
                             catch { isOnline = false; }
 
-                            // 如果按名称打开失败，尝试通过 CameraHelper 显射到索引再打开
+                            // 如果按名称打开失败，尝试通过 CameraHelper 映射到索引再打开
                             if (!isOnline)
                             {
                                 int mappedIndex = CameraHelper.GetCameraIndexByName(device.DeviceId);
@@ -568,7 +584,9 @@ namespace edge_runtime
         {
             if (string.IsNullOrEmpty(modelPath))
             {
-                Dispatcher.Invoke(() => MessageBox.Show("模型路径为空，将跳过 AI 模型加载"));
+                string msg = "模型路径为空，将跳过 AI 模型加载";
+                Dispatcher.Invoke(() => MessageBox.Show(msg));
+                UILogManager.Instance.LogWarning(msg);
                 return;
             }
 
@@ -581,24 +599,32 @@ namespace edge_runtime
                 if (File.Exists(alternativePath))
                 {
                     finalModelPath = alternativePath;
+                    UILogManager.Instance.LogInfo($"模型路径已自动更正: {finalModelPath}");
                 }
             }
 
             if (!File.Exists(finalModelPath))
             {
-                Dispatcher.Invoke(() => MessageBox.Show($"模型文件不存在: {modelPath}"));
+                string msg = $"模型文件不存在: {modelPath}";
+                Dispatcher.Invoke(() => MessageBox.Show(msg));
+                UILogManager.Instance.LogError(msg);
                 return;
             }
 
             try
             {
+                UILogManager.Instance.LogInfo($"正在加载 AI 模型: {finalModelPath}");
                 var labels = OnnxHelper.ReadLabelsFromModel(finalModelPath);
                 _aiService = new OnnxInferenceService(finalModelPath, labels);
-                Dispatcher.Invoke(() => MessageBox.Show($"AI 模型已加载: {finalModelPath}"));
+                string msg = $"AI 模型已成功加载: {finalModelPath}";
+                Dispatcher.Invoke(() => MessageBox.Show(msg));
+                UILogManager.Instance.LogInfo(msg);
             }
             catch (Exception ex)
             {
-                Dispatcher.Invoke(() => MessageBox.Show($"加载 AI 模型失败: {ex.Message}"));
+                string msg = $"加载 AI 模型失败: {ex.Message}";
+                Dispatcher.Invoke(() => MessageBox.Show(msg));
+                UILogManager.Instance.LogError(msg);
             }
         }
 
@@ -660,6 +686,143 @@ namespace edge_runtime
         private void OnStopVideo_Click(object sender, RoutedEventArgs e)
         {
             StandardPlayer.Stop();
+        }
+
+        // [新增] 清空日志
+        private void BtnClearLogs_Click(object sender, RoutedEventArgs e)
+        {
+            UILogManager.Instance.ClearLogs();
+        }
+
+        // 打开外部编辑器（edge 仓库的动作树编辑器）
+        private void BtnOpenEditor_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // 1) 从配置读取编辑器路径
+                string editorPath = ConfigManager.Instance.GetEditorPath();
+
+                // 2) 如果未配置，提示用户选择可执行文件或项目目录
+                if (string.IsNullOrEmpty(editorPath) || (!File.Exists(editorPath) && !Directory.Exists(editorPath)))
+                {
+                    var dlg = new OpenFileDialog();
+                    dlg.Filter = "可执行文件 (*.exe)|*.exe|库文件 (*.dll)|*.dll|项目目录|*.*";
+                    dlg.Title = "请选择动作树编辑器的可执行文件、DLL 或 edge 项目目录";
+                    if (dlg.ShowDialog() == true)
+                    {
+                        editorPath = dlg.FileName;
+                        // 如果用户选择的是目录通过 FolderBrowserDialog 会更合适, but OpenFileDialog returns a file — allow manual entry
+                        var ok = ConfigManager.Instance.SetEditorPath(editorPath);
+                        UILogManager.Instance.LogInfo($"编辑器路径已保存: {ok}");
+                    }
+                    else
+                    {
+                        UILogManager.Instance.LogWarning("未选择编辑器可执行文件或目录");
+                        return;
+                    }
+                }
+
+                // 3) 如果是可执行文件，直接启动进程
+                if (File.Exists(editorPath) && editorPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    var startInfo = new System.Diagnostics.ProcessStartInfo(editorPath)
+                    {
+                        UseShellExecute = true
+                    };
+                    System.Diagnostics.Process.Start(startInfo);
+                    UILogManager.Instance.LogInfo($"已启动外部编辑器进程: {editorPath}");
+                    return;
+                }
+
+                // 4) 如果是 DLL 文件，尝试加载并查找 Window 派生类型
+                if (File.Exists(editorPath) && editorPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TryLoadAndShowWindowFromAssembly(editorPath))
+                    {
+                        UILogManager.Instance.LogInfo($"已在当前进程中加载编辑器: {editorPath}");
+                        return;
+                    }
+                    else
+                    {
+                        throw new Exception("未在 DLL 中找到可用的 Window 类型");
+                    }
+                }
+
+                // 5) 如果是目录（例如 edge 仓库根目录），尝试搜索常见输出路径并加载第一个合适的 DLL
+                if (Directory.Exists(editorPath))
+                {
+                    // 搜索候选输出目录
+                    var candidates = new List<string>
+                    {
+                        Path.Combine(editorPath, "bin", "Debug"),
+                        Path.Combine(editorPath, "bin", "Debug", "net8.0"),
+                        Path.Combine(editorPath, "bin", "Debug", "net8.0-windows"),
+                        Path.Combine(editorPath, "out"),
+                        Path.Combine(editorPath, "build")
+                    };
+
+                    foreach (var dir in candidates)
+                    {
+                        if (!Directory.Exists(dir)) continue;
+                        var dlls = Directory.GetFiles(dir, "*.dll", SearchOption.TopDirectoryOnly);
+                        foreach (var dll in dlls)
+                        {
+                            try
+                            {
+                                if (TryLoadAndShowWindowFromAssembly(dll))
+                                {
+                                    UILogManager.Instance.LogInfo($"已在当前进程中加载编辑器 DLL: {dll}");
+                                    return;
+                                }
+                            }
+                            catch { /* ignore and try next */ }
+                        }
+                    }
+
+                    // 如果没有找到任何合适的 dll，提示用户先编译 edge 项目或选择 exe
+                    throw new Exception("在指定目录中未找到可加载的编辑器输出 (DLL/EXE)。请先编译 edge 项目或手动选择编辑器的可执行文件。");
+                }
+
+                throw new Exception("提供的编辑器路径无效");
+            }
+            catch (Exception ex)
+            {
+                string msg = $"启动编辑器失败: {ex.Message}";
+                MessageBox.Show(msg);
+                UILogManager.Instance.LogError(msg);
+            }
+        }
+
+        // 尝试在当前 AppDomain 中加载程序集并显示第一个找到的 Window 派生类型
+        private bool TryLoadAndShowWindowFromAssembly(string assemblyPath)
+        {
+            try
+            {
+                // Load assembly into load context
+                var asm = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
+
+                foreach (var type in asm.GetExportedTypes())
+                {
+                    if (typeof(System.Windows.Window).IsAssignableFrom(type))
+                    {
+                        // 创建窗口实例并显示（在 UI 线程）
+                        Dispatcher.Invoke(() =>
+                        {
+                            var wnd = (System.Windows.Window)Activator.CreateInstance(type);
+                            wnd.Owner = this;
+                            wnd.Show();
+                        });
+
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                UILogManager.Instance.LogError($"加载程序集失败: {assemblyPath} -> {ex.Message}");
+            }
+
+            return false;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
