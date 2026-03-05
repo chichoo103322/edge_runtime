@@ -119,6 +119,15 @@
                                     </Style>
                                 </Button.Resources>
                             </Button>
+                            <Button x:Name="BtnOpenEditor" Content="✏️ 打开编辑器" Click="BtnOpenEditor_Click" 
+                                    Margin="15,0,0,0" Padding="20,8" Background="#E67E22" Foreground="White" 
+                                    BorderThickness="0" FontSize="16" ToolTip="打开动作树编辑器">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="5"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
                         </StackPanel>
                     </Grid>
                     <Viewbox Stretch="Uniform" Margin="10" VerticalAlignment="Top">
