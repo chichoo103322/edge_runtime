@@ -169,6 +169,23 @@ namespace edge_runtime
             }
         }
 
+        // 新增：获取默认摄像头索引
+        public int GetDefaultCameraIndex()
+        {
+            try
+            {
+                if (_config.ValueKind == JsonValueKind.Undefined)
+                    return -1;
+
+                var camera = _config.GetProperty("CameraSettings");
+                return GetJsonInt(camera, "DefaultCameraIndex", -1);
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
         // 编辑器设置
         public string GetEditorPath()
         {

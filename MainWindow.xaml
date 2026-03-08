@@ -128,6 +128,16 @@
                                     </Style>
                                 </Button.Resources>
                             </Button>
+
+                            <Button x:Name="BtnOpenVideoProcessor" Content="🎬 视频处理" 
+                                    Margin="15,0,0,0" Padding="20,8" Background="#9B59B6" Foreground="White" 
+                                    BorderThickness="0" FontSize="16" ToolTip="打开视频处理编辑器">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="5"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
                         </StackPanel>
                     </Grid>
                     <Viewbox Stretch="Uniform" Margin="10" VerticalAlignment="Top">

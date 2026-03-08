@@ -95,6 +95,9 @@ namespace edge_runtime
             
             // 初始化 UI 日志系统
             UILogManager.Instance.LogInfo("应用程序已启动");
+
+            // 绑定视频处理按钮的点击事件（在 XAML 中声明了 x:Name）
+            BtnOpenVideoProcessor.Click += BtnOpenVideoProcessor_Click;
         }
 
         private void BtnLoadProject_Click(object sender, RoutedEventArgs e)
@@ -795,6 +798,44 @@ namespace edge_runtime
             catch (Exception ex)
             {
                 string msg = $"启动编辑器失败: {ex.Message}";
+                MessageBox.Show(msg);
+                UILogManager.Instance.LogError(msg);
+            }
+        }
+
+        // 打开视频处理窗口
+        private void BtnOpenVideoProcessor_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // 优先使用当前步骤的相机配置
+                string cameraId = string.Empty;
+                int cameraIndex = -1;
+
+                if (_currentStep != null && !string.IsNullOrEmpty(_currentStep.CameraId))
+                {
+                    cameraId = _currentStep.CameraId;
+                    cameraIndex = CameraHelper.GetCameraIndexByName(cameraId);
+                    UILogManager.Instance.LogInfo($"使用当前步骤的相机: {cameraId}");
+                }
+
+                VideoProcessorWindow wnd;
+                if (!string.IsNullOrEmpty(cameraId))
+                {
+                    wnd = new VideoProcessorWindow(cameraId, cameraIndex);
+                }
+                else
+                {
+                    wnd = new VideoProcessorWindow();
+                }
+
+                wnd.Owner = this;
+                wnd.Show();
+                UILogManager.Instance.LogInfo("已打开 视频处理编辑器 窗口");
+            }
+            catch (Exception ex)
+            {
+                string msg = $"打开视频处理编辑器失败: {ex.Message}";
                 MessageBox.Show(msg);
                 UILogManager.Instance.LogError(msg);
             }
