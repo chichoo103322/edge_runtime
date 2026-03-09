@@ -18,5 +18,13 @@
   },
   "EditorSettings": {
     "EditorPath": ""
+  },
+  "DotNetPublish": {
+    "Configuration": "Release",
+    "RuntimeIdentifier": "win-x64",
+    "PublishSingleFile": true,
+    "SelfContained": true,
+    "IncludeNativeLibrariesForSelfExtract": true
   }
 }
+
