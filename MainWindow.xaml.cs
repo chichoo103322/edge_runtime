@@ -803,6 +803,24 @@ namespace edge_runtime
             }
         }
 
+        // 打开错误日志查看器
+        private void BtnOpenErrorViewer_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var viewer = new ErrorLogViewerWindow();
+                viewer.Owner = this;
+                viewer.Show();
+                UILogManager.Instance.LogInfo("已打开 错误日志查看器 窗口");
+            }
+            catch (Exception ex)
+            {
+                string msg = $"打开错误日志查看器失败: {ex.Message}";
+                MessageBox.Show(msg);
+                UILogManager.Instance.LogError(msg);
+            }
+        }
+
         // 打开视频处理窗口
         private void BtnOpenVideoProcessor_Click(object sender, RoutedEventArgs e)
         {

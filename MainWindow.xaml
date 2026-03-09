@@ -138,6 +138,16 @@
                                     </Style>
                                 </Button.Resources>
                             </Button>
+
+                            <Button x:Name="BtnOpenErrorViewer" Content="📷 错误日志" Click="BtnOpenErrorViewer_Click"
+                                    Margin="15,0,0,0" Padding="20,8" Background="#E74C3C" Foreground="White" 
+                                    BorderThickness="0" FontSize="16" ToolTip="查看错误截帧图片">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="5"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
                         </StackPanel>
                     </Grid>
                     <Viewbox Stretch="Uniform" Margin="10" VerticalAlignment="Top">
