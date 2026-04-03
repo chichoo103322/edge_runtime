@@ -14,16 +14,36 @@ using WpfWindow = System.Windows.Window;
 
 namespace edge_runtime
 {
+    /// <summary>
+    /// 主窗口 - 应用程序的UI入口和服务协调器
+    /// 职责：
+    /// 1. 初始化和管理所有服务类
+    /// 2. 处理UI事件（按钮点击、菜单操作等）
+    /// 3. 数据绑定（UI <-> ViewModel）
+    /// 4. 协调各个服务之间的交互
+    /// 
+    /// 遵循 MVVM 架构和单一职责原则（SRP）
+    /// </summary>
     public partial class MainWindow : WpfWindow, INotifyPropertyChanged
     {
-        // UI 数据绑定
+        #region UI 数据绑定属性
+
+        /// <summary>
+        /// 动作列集合（工艺流程的列显示）
+        /// </summary>
         public ObservableCollection<ProcessActionViewModel> ActionColumns { get; set; }
             = new ObservableCollection<ProcessActionViewModel>();
 
+        /// <summary>
+        /// 设备列表（相机设备状态显示）
+        /// </summary>
         public ObservableCollection<DeviceViewModel> DeviceList { get; set; }
             = new ObservableCollection<DeviceViewModel>();
 
         private ProcessStateViewModel _currentStep;
+        /// <summary>
+        /// 当前执行的步骤
+        /// </summary>
         public ProcessStateViewModel CurrentStep
         {
             get => _currentStep;
@@ -31,64 +51,113 @@ namespace edge_runtime
         }
 
         private string _currentStationName = "未知工位";
+        /// <summary>
+        /// 当前工位名称
+        /// </summary>
         public string CurrentStationName
         {
             get => _currentStationName;
             set { _currentStationName = value; OnPropertyChanged(); }
         }
 
-        // 服务类
+        #endregion
+
+        #region 服务实例
+
+        /// <summary>
+        /// 相机管理服务 - 负责相机打开、读取和状态管理
+        /// </summary>
         private CameraManager _cameraManager;
+
+        /// <summary>
+        /// 流程执行器 - 负责工艺流程的执行逻辑
+        /// </summary>
         private WorkflowExecutor _workflowExecutor;
+
+        /// <summary>
+        /// 工作流加载器 - 负责从JSON加载和解析配置
+        /// </summary>
         private WorkflowLoader _workflowLoader;
+
+        /// <summary>
+        /// 设备状态监控器 - 负责检测和更新设备在线状态
+        /// </summary>
         private DeviceStatusMonitor _deviceStatusMonitor;
+
+        /// <summary>
+        /// 外部编辑器启动器 - 负责启动动作树编辑器
+        /// </summary>
         private EditorLauncher _editorLauncher;
+
+        /// <summary>
+        /// AI模型加载器 - 负责加载ONNX模型
+        /// </summary>
         private ModelLoader _modelLoader;
+
+        /// <summary>
+        /// 日志服务 - 负责记录错误截图和数据库日志
+        /// </summary>
         private LogService _logService;
+
+        /// <summary>
+        /// AI推理服务 - 负责动作识别
+        /// </summary>
         private OnnxInferenceService _aiService;
 
-        // 数据
+        #endregion
+
+        #region 数据
+
+        /// <summary>
+        /// 执行队列（线性化的步骤列表）
+        /// </summary>
         private List<ProcessStateViewModel> _executionQueue = new List<ProcessStateViewModel>();
 
+        #endregion
+
+        /// <summary>
+        /// 构造函数
+        /// </summary>
         public MainWindow()
         {
             InitializeComponent();
             DataContext = this;
 
+            // 初始化所有服务
             InitializeServices();
 
             UILogManager.Instance.LogInfo("应用程序已启动");
         }
 
         /// <summary>
-        /// 初始化所有服务
+        /// 初始化所有服务实例
         /// </summary>
         private void InitializeServices()
         {
-            // 相机管理器
+            // 1. 相机管理器
             _cameraManager = new CameraManager(
-                onFrameReceived: bitmap => VideoFeed.Source = bitmap,
-                onFrameProcessing: frame => _workflowExecutor?.ProcessFrame(frame)
+                onFrameReceived: bitmap => VideoFeed.Source = bitmap,  // 帧接收回调
+                onFrameProcessing: frame => _workflowExecutor?.ProcessFrame(frame)  // 帧处理回调
             );
 
-            // 工作流加载器
+            // 2. 工作流加载器
             _workflowLoader = new WorkflowLoader();
 
-            // 设备状态监控器
+            // 3. 设备状态监控器
             _deviceStatusMonitor = new DeviceStatusMonitor(
                 DeviceList,
-                isCameraBusy: () => _cameraManager?.IsRunning ?? false,
-                getCurrentCameraId: () => _cameraManager?.CurrentCameraId,
-                getCurrentCameraIndex: () => _cameraManager?.CurrentCameraIndex
+                isCameraBusy: () => _cameraManager?.IsRunning ?? false,  // 相机是否正在运行
+                getCurrentCameraId: () => _cameraManager?.CurrentCameraId,  // 获取当前相机ID
+                getCurrentCameraIndex: () => _cameraManager?.CurrentCameraIndex  // 获取当前相机索引
             );
 
-            // 编辑器启动器
+            // 4. 编辑器启动器
             _editorLauncher = new EditorLauncher();
 
-            // 模型加载器
+            // 5. 模型加载器
             _modelLoader = new ModelLoader();
 
-            // 日志服务
+            // 6. 日志服务
             try
             {
                 _logService = new LogService("ErrorLogs");
@@ -99,8 +168,11 @@ namespace edge_runtime
             }
         }
 
-        // ==================== 事件处理器 ====================
+        #region 事件处理器
 
+        /// <summary>
+        /// 导入流程JSON按钮点击事件
+        /// </summary>
         private void BtnLoadProject_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new OpenFileDialog { Filter = "流程文件 (*.json)|*.json" };
@@ -110,11 +182,17 @@ namespace edge_runtime
             }
         }
 
+        /// <summary>
+        /// 打开动作树编辑器按钮点击事件
+        /// </summary>
         private void BtnOpenEditor_Click(object sender, RoutedEventArgs e)
         {
             _editorLauncher.OpenEditor(this);
         }
 
+        /// <summary>
+        /// 打开错误日志查看器按钮点击事件
+        /// </summary>
         private void BtnOpenErrorViewer_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -132,6 +210,9 @@ namespace edge_runtime
             }
         }
 
+        /// <summary>
+        /// 打开视频处理编辑器按钮点击事件
+        /// </summary>
         private void BtnOpenVideoProcessor_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -139,6 +220,7 @@ namespace edge_runtime
                 string cameraId = string.Empty;
                 int cameraIndex = -1;
 
+                // 优先使用当前步骤的相机配置
                 if (_currentStep != null && !string.IsNullOrEmpty(_currentStep.CameraId))
                 {
                     cameraId = _currentStep.CameraId;
@@ -146,6 +228,7 @@ namespace edge_runtime
                     UILogManager.Instance.LogInfo($"使用当前步骤的相机: {cameraId}");
                 }
 
+                // 创建视频处理窗口
                 VideoProcessorWindow wnd = !string.IsNullOrEmpty(cameraId)
                     ? new VideoProcessorWindow(cameraId, cameraIndex)
                     : new VideoProcessorWindow();
@@ -162,15 +245,22 @@ namespace edge_runtime
             }
         }
 
+        /// <summary>
+        /// 清空日志按钮点击事件
+        /// </summary>
         private void BtnClearLogs_Click(object sender, RoutedEventArgs e)
         {
             UILogManager.Instance.ClearLogs();
         }
 
+        /// <summary>
+        /// 播放步骤视频按钮点击事件
+        /// </summary>
         private void OnStepVideo_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button button && button.Tag is ProcessStateViewModel step)
             {
+                // 验证视频路径
                 if (string.IsNullOrEmpty(step.VideoPath))
                 {
                     MessageBox.Show("该步骤没有关联的视频");
@@ -183,6 +273,7 @@ namespace edge_runtime
                     return;
                 }
 
+                // 设置视频源并打开播放窗口
                 try
                 {
                     var fullPath = Path.GetFullPath(step.VideoPath);
@@ -196,6 +287,9 @@ namespace edge_runtime
             }
         }
 
+        /// <summary>
+        /// 关闭视频播放窗口
+        /// </summary>
         private void OnCloseVideo_Click(object sender, RoutedEventArgs e)
         {
             StandardPlayer.Stop();
@@ -203,31 +297,46 @@ namespace edge_runtime
             VideoPopup.IsOpen = false;
         }
 
+        /// <summary>
+        /// 播放视频
+        /// </summary>
         private void OnPlayVideo_Click(object sender, RoutedEventArgs e)
         {
             StandardPlayer.Play();
         }
 
+        /// <summary>
+        /// 暂停视频
+        /// </summary>
         private void OnPauseVideo_Click(object sender, RoutedEventArgs e)
         {
             StandardPlayer.Pause();
         }
 
+        /// <summary>
+        /// 停止视频
+        /// </summary>
         private void OnStopVideo_Click(object sender, RoutedEventArgs e)
         {
             StandardPlayer.Stop();
         }
 
-        // ==================== 工作流加载和执行 ====================
+        #endregion
 
+        #region 工作流加载和执行
+
+        /// <summary>
+        /// 加载工作流（从JSON文件）
+        /// </summary>
+        /// <param name="filepath">JSON文件路径</param>
         private void LoadWorkflow(string filepath)
         {
             try
             {
-                // 加载工作流
+                // 步骤1: 加载工作流配置
                 var result = _workflowLoader.LoadFromFile(filepath);
 
-                // 更新UI数据
+                // 步骤2: 更新UI数据绑定
                 ActionColumns.Clear();
                 foreach (var col in result.ActionColumns)
                 {
@@ -240,13 +349,13 @@ namespace edge_runtime
                 if (_executionQueue.Count > 0)
                     CurrentStationName = _executionQueue[0].StationName;
 
-                // 初始化设备列表
+                // 步骤3: 初始化设备列表
                 _deviceStatusMonitor.InitializeDeviceList(result.CameraIds);
 
-                // 加载AI模型
+                // 步骤4: 加载AI模型
                 _aiService = _modelLoader.LoadModel(result.ModelPath);
 
-                // 创建工作流执行器
+                // 步骤5: 创建流程执行器
                 _workflowExecutor = new WorkflowExecutor(
                     _executionQueue,
                     _aiService,
@@ -263,10 +372,10 @@ namespace edge_runtime
                     })
                 );
 
-                // 启动相机监控
+                // 步骤6: 启动相机监控
                 _ = _cameraManager.StartAsync(result.PrimaryCameraId, result.PrimaryCameraIndex);
 
-                // 延迟检测设备状态
+                // 步骤7: 延迟1.5秒后检测设备状态（等待相机初始化）
                 Task.Delay(1500).ContinueWith(_ => _deviceStatusMonitor.CheckAllDevicesAsync());
             }
             catch (Exception ex)
@@ -277,19 +386,33 @@ namespace edge_runtime
             }
         }
 
-        // ==================== INotifyPropertyChanged ====================
+        #endregion
+
+        #region INotifyPropertyChanged 实现
 
         public event PropertyChangedEventHandler PropertyChanged;
+
+        /// <summary>
+        /// 触发属性变更通知
+        /// </summary>
+        /// <param name="name">属性名（自动获取）</param>
         protected void OnPropertyChanged([CallerMemberName] string name = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
-        // ==================== 清理资源 ====================
+        #endregion
 
+        #region 清理资源
+
+        /// <summary>
+        /// 窗口关闭时的清理工作
+        /// </summary>
         protected override void OnClosed(EventArgs e)
         {
             _cameraManager?.Dispose();
             _logService = null;
             base.OnClosed(e);
         }
+
+        #endregion
     }
 }
