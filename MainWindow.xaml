@@ -107,48 +107,70 @@
 
             <Border Grid.Column="1" BorderBrush="#1B2B4A" BorderThickness="2" Margin="5" Background="#0A1633">
                 <DockPanel>
-                    <Grid DockPanel.Dock="Top" Background="#1B2B4A" Height="60">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0">
-                            <TextBlock Text="实时工艺看板" FontSize="24" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
-                            <Button x:Name="BtnLoad" Content="📂 导入流程 JSON" Click="BtnLoadProject_Click" 
-                                    Margin="30,0,0,0" Padding="20,8" Background="#2980b9" Foreground="White" 
-                                    BorderThickness="0" FontSize="16">
-                                <Button.Resources>
-                                    <Style TargetType="Border">
-                                        <Setter Property="CornerRadius" Value="5"/>
-                                    </Style>
-                                </Button.Resources>
-                            </Button>
-                            <Button x:Name="BtnOpenEditor" Content="✏️ 打开编辑器" Click="BtnOpenEditor_Click" 
-                                    Margin="15,0,0,0" Padding="20,8" Background="#E67E22" Foreground="White" 
-                                    BorderThickness="0" FontSize="16" ToolTip="打开动作树编辑器">
-                                <Button.Resources>
-                                    <Style TargetType="Border">
-                                        <Setter Property="CornerRadius" Value="5"/>
-                                    </Style>
-                                </Button.Resources>
-                            </Button>
+                    <Grid DockPanel.Dock="Top" Background="#1B2B4A" MinHeight="60">
+                        <ScrollViewer VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Auto" Margin="20,0">
+                            <WrapPanel VerticalAlignment="Center" Orientation="Horizontal">
+                                <TextBlock Text="实时工艺看板" FontSize="24" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" Margin="0,0,30,0"/>
+                                <Button x:Name="BtnLoad" Content="📂 导入流程 JSON" Click="BtnLoadProject_Click" 
+                                        Margin="0,8,15,8" Padding="18,8" Background="#2980b9" Foreground="White" 
+                                        BorderThickness="0" FontSize="14">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="5"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+                                <Button x:Name="BtnOpenEditor" Content="✏️ 打开编辑器" Click="BtnOpenEditor_Click" 
+                                        Margin="0,8,15,8" Padding="18,8" Background="#E67E22" Foreground="White" 
+                                        BorderThickness="0" FontSize="14" ToolTip="打开动作树编辑器">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="5"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
 
-                            <Button x:Name="BtnOpenVideoProcessor" Content="🎬 视频处理" 
-                                    Margin="15,0,0,0" Padding="20,8" Background="#9B59B6" Foreground="White" 
-                                    BorderThickness="0" FontSize="16" ToolTip="打开视频处理编辑器">
-                                <Button.Resources>
-                                    <Style TargetType="Border">
-                                        <Setter Property="CornerRadius" Value="5"/>
-                                    </Style>
-                                </Button.Resources>
-                            </Button>
+                                <Button x:Name="BtnOpenVideoProcessor" Content="🎬 视频处理" 
+                                        Margin="0,8,15,8" Padding="18,8" Background="#9B59B6" Foreground="White" 
+                                        BorderThickness="0" FontSize="14" ToolTip="打开视频处理编辑器">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="5"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
 
-                            <Button x:Name="BtnOpenErrorViewer" Content="📷 错误日志" Click="BtnOpenErrorViewer_Click"
-                                    Margin="15,0,0,0" Padding="20,8" Background="#E74C3C" Foreground="White" 
-                                    BorderThickness="0" FontSize="16" ToolTip="查看错误截帧图片">
-                                <Button.Resources>
-                                    <Style TargetType="Border">
-                                        <Setter Property="CornerRadius" Value="5"/>
-                                    </Style>
-                                </Button.Resources>
-                            </Button>
-                        </StackPanel>
+                                <Button x:Name="BtnImportTestVideo" Content="📹 导入检测视频" Click="BtnImportTestVideo_Click"
+                                        Margin="0,8,15,8" Padding="18,8" Background="#16A085" Foreground="White" 
+                                        BorderThickness="0" FontSize="14" ToolTip="选择视频文件进行动态识别检测">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="5"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+
+                                <Button x:Name="BtnEnableCameraDetection" Content="📷 启用相机检测" Click="BtnEnableCameraDetection_Click"
+                                        Margin="0,8,15,8" Padding="18,8" Background="#2980b9" Foreground="White" 
+                                        BorderThickness="0" FontSize="14" ToolTip="启用相机进行实时检测">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="5"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+
+                                <Button x:Name="BtnOpenErrorViewer" Content="📷 错误日志" Click="BtnOpenErrorViewer_Click"
+                                        Margin="0,8,15,8" Padding="18,8" Background="#E74C3C" Foreground="White" 
+                                        BorderThickness="0" FontSize="14" ToolTip="查看错误截帧图片">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="5"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+                            </WrapPanel>
+                        </ScrollViewer>
                     </Grid>
                     <Viewbox Stretch="Uniform" Margin="10" VerticalAlignment="Top">
                         <ItemsControl ItemsSource="{Binding ActionColumns}">

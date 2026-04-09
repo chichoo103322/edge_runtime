@@ -14,16 +14,7 @@ using WpfWindow = System.Windows.Window;
 
 namespace edge_runtime
 {
-    /// <summary>
-    /// 主窗口 - 应用程序的UI入口和服务协调器
-    /// 职责：
-    /// 1. 初始化和管理所有服务类
-    /// 2. 处理UI事件（按钮点击、菜单操作等）
-    /// 3. 数据绑定（UI <-> ViewModel）
-    /// 4. 协调各个服务之间的交互
-    /// 
-    /// 遵循 MVVM 架构和单一职责原则（SRP）
-    /// </summary>
+  
     public partial class MainWindow : WpfWindow, INotifyPropertyChanged
     {
         #region UI 数据绑定属性
@@ -65,9 +56,14 @@ namespace edge_runtime
         #region 服务实例
 
         /// <summary>
-        /// 相机管理服务 - 负责相机打开、读取和状态管理
+        /// 相机管理服务 - 负责相机打开、读取和状态管理（已弃用，使用 VideoSourceManager 替代）
         /// </summary>
         private CameraManager _cameraManager;
+
+        /// <summary>
+        /// 视频源管理器 - 统一管理相机和视频文件源
+        /// </summary>
+        private VideoSourceManager _videoSourceManager;
 
         /// <summary>
         /// 流程执行器 - 负责工艺流程的执行逻辑
@@ -113,6 +109,11 @@ namespace edge_runtime
         /// </summary>
         private List<ProcessStateViewModel> _executionQueue = new List<ProcessStateViewModel>();
 
+        /// <summary>
+        /// 当前视频源类型
+        /// </summary>
+        private VideoSourceManager.VideoSourceType _currentVideoSourceType = VideoSourceManager.VideoSourceType.Camera;
+
         #endregion
 
         /// <summary>
@@ -134,8 +135,8 @@ namespace edge_runtime
         /// </summary>
         private void InitializeServices()
         {
-            // 1. 相机管理器
-            _cameraManager = new CameraManager(
+            // 1. 视频源管理器（统一管理相机和视频文件源）
+            _videoSourceManager = new VideoSourceManager(
                 onFrameReceived: bitmap => VideoFeed.Source = bitmap,  // 帧接收回调
                 onFrameProcessing: frame => _workflowExecutor?.ProcessFrame(frame)  // 帧处理回调
             );
@@ -146,9 +147,9 @@ namespace edge_runtime
             // 3. 设备状态监控器
             _deviceStatusMonitor = new DeviceStatusMonitor(
                 DeviceList,
-                isCameraBusy: () => _cameraManager?.IsRunning ?? false,  // 相机是否正在运行
-                getCurrentCameraId: () => _cameraManager?.CurrentCameraId,  // 获取当前相机ID
-                getCurrentCameraIndex: () => _cameraManager?.CurrentCameraIndex  // 获取当前相机索引
+                isCameraBusy: () => _videoSourceManager?.IsRunning ?? false,  // 视频源是否正在运行
+                getCurrentCameraId: () => _videoSourceManager?.CurrentCameraId,  // 获取当前相机ID
+                getCurrentCameraIndex: () => _videoSourceManager?.CurrentCameraIndex  // 获取当前相机索引
             );
 
             // 4. 编辑器启动器
@@ -321,6 +322,88 @@ namespace edge_runtime
             StandardPlayer.Stop();
         }
 
+        /// <summary>
+        /// 导入检测视频按钮点击事件 - 选择视频文件进行动态识别检测
+        /// </summary>
+        private void BtnImportTestVideo_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "视频文件 (*.mp4;*.avi;*.mov;*.mkv)|*.mp4;*.avi;*.mov;*.mkv|所有文件 (*.*)|*.*"
+            };
+
+            if (dlg.ShowDialog() == true)
+            {
+                _ = StartVideoFileDetection(dlg.FileName);
+            }
+        }
+
+        /// <summary>
+        /// 启用相机检测按钮点击事件
+        /// </summary>
+        private void BtnEnableCameraDetection_Click(object sender, RoutedEventArgs e)
+        {
+            if (_executionQueue.Count == 0)
+            {
+                MessageBox.Show("请先加载工作流配置");
+                return;
+            }
+
+            _ = StartCameraDetection();
+        }
+
+        /// <summary>
+        /// 启动摄像头检测
+        /// </summary>
+        private async Task StartCameraDetection()
+        {
+            try
+            {
+                if (_executionQueue.Count == 0)
+                    return;
+
+                var primaryCameraId = _executionQueue[0].CameraId;
+                int? primaryCameraIndex = !string.IsNullOrEmpty(primaryCameraId)
+                    ? CameraHelper.GetCameraIndexByName(primaryCameraId)
+                    : 0;
+
+                _currentVideoSourceType = VideoSourceManager.VideoSourceType.Camera;
+                await _videoSourceManager.StartCameraAsync(primaryCameraId, primaryCameraIndex);
+                UILogManager.Instance.LogInfo("已启用相机检测");
+            }
+            catch (Exception ex)
+            {
+                string msg = $"启用相机检测失败: {ex.Message}";
+                MessageBox.Show(msg);
+                UILogManager.Instance.LogError(msg);
+            }
+        }
+
+        /// <summary>
+        /// 启动视频文件检测
+        /// </summary>
+        private async Task StartVideoFileDetection(string videoFilePath)
+        {
+            try
+            {
+                if (!File.Exists(videoFilePath))
+                {
+                    MessageBox.Show($"视频文件不存在: {videoFilePath}");
+                    return;
+                }
+
+                _currentVideoSourceType = VideoSourceManager.VideoSourceType.VideoFile;
+                await _videoSourceManager.StartVideoFileAsync(videoFilePath, isLooping: true);
+                UILogManager.Instance.LogInfo($"已导入视频进行检测: {Path.GetFileName(videoFilePath)}");
+            }
+            catch (Exception ex)
+            {
+                string msg = $"启动视频检测失败: {ex.Message}";
+                MessageBox.Show(msg);
+                UILogManager.Instance.LogError(msg);
+            }
+        }
+
         #endregion
 
         #region 工作流加载和执行
@@ -352,8 +435,8 @@ namespace edge_runtime
                 // 步骤3: 初始化设备列表
                 _deviceStatusMonitor.InitializeDeviceList(result.CameraIds);
 
-                // 步骤4: 加载AI模型
-                _aiService = _modelLoader.LoadModel(result.ModelPath);
+                // 步骤4: 加载AI模型（传入模型输入尺寸，支持自适应预处理）
+                _aiService = _modelLoader.LoadModel(result.ModelPath, result.ModelInputSize);
 
                 // 步骤5: 创建流程执行器
                 _workflowExecutor = new WorkflowExecutor(
@@ -372,8 +455,9 @@ namespace edge_runtime
                     })
                 );
 
-                // 步骤6: 启动相机监控
-                _ = _cameraManager.StartAsync(result.PrimaryCameraId, result.PrimaryCameraIndex);
+                // 步骤6: 启动相机监控（使用新的视频源管理器）
+                _currentVideoSourceType = VideoSourceManager.VideoSourceType.Camera;
+                _ = _videoSourceManager.StartCameraAsync(result.PrimaryCameraId, result.PrimaryCameraIndex);
 
                 // 步骤7: 延迟1.5秒后检测设备状态（等待相机初始化）
                 Task.Delay(1500).ContinueWith(_ => _deviceStatusMonitor.CheckAllDevicesAsync());
@@ -408,6 +492,7 @@ namespace edge_runtime
         /// </summary>
         protected override void OnClosed(EventArgs e)
         {
+            _videoSourceManager?.Dispose();
             _cameraManager?.Dispose();
             _logService = null;
             base.OnClosed(e);
