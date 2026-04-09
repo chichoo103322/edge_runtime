@@ -7,6 +7,12 @@ namespace edge_runtime
     {
         public List<ActionStep> Actions { get; set; } = new List<ActionStep>();
         public string ModelPath { get; set; } = string.Empty;  // AI 模型路径
+        /// <summary>
+        /// 模型输入尺寸（如640、512等）
+        /// 用于自适应图像预处理
+        /// 如果未指定，默认使用640
+        /// </summary>
+        public int ModelInputSize { get; set; } = 640;
     }
 
     // 对应 Actions 列表里的每一项

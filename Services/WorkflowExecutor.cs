@@ -115,22 +115,28 @@ namespace edge_runtime.Services
             var result = _aiService.Predict(frame);
 
             // 在图像上绘制检测结果（边界框和标签）
-            if (!string.IsNullOrEmpty(result.Label) && result.Label != "Unknown" && result.Confidence > 0)
+            if (result.Label != "Unknown" && result.Confidence >= 0.25f)
             {
-                // 1. 绘制边界框 (绿色, 粗细2)
-                Cv2.Rectangle(frame, result.Box, Scalar.LimeGreen, 2);
+                // 1. 根据 Label 字符串动态计算稳定的 BGR 颜色
+                // 使用 HashCode 确保同一个标签每次生成的颜色绝对一致，同时加上 100 保证颜色足够明亮显眼
+                int hash = result.Label.GetHashCode();
+                int b = (Math.Abs(hash) % 155) + 100;
+                int g = (Math.Abs(hash >> 8) % 155) + 100;
+                int r = (Math.Abs(hash >> 16) % 155) + 100;
+                Scalar dynamicBoxColor = new Scalar(b, g, r);
 
-                // 2. 准备文字内容
-                string text = $"{result.Label} {result.Confidence:P1}";
+                // 2. 绘制边界框
+                Cv2.Rectangle(frame, result.Box, dynamicBoxColor, 2, LineTypes.AntiAlias);
 
-                // 3. 计算文字背景尺寸
-                var textSize = Cv2.GetTextSize(text, HersheyFonts.HersheySimplex, 0.8, 2, out int baseline);
-                int textY = Math.Max(result.Box.Y, textSize.Height + 10); // 防止文字超出顶部
-                var bgRect = new OpenCvSharp.Rect(result.Box.X, textY - textSize.Height - 5, textSize.Width + 10, textSize.Height + 10);
+                // 3. 绘制文字背景和置信度标签
+                string text = $"{result.Label} {result.Confidence:F2}";
+                var textSize = Cv2.GetTextSize(text, HersheyFonts.HersheySimplex, 0.7, 2, out int baseline);
+                int textY = Math.Max(0, result.Box.Y - textSize.Height - 10);
+                var textBgRect = new OpenCvSharp.Rect(result.Box.X, textY, textSize.Width + 10, textSize.Height + 10);
 
-                // 4. 绘制半透明黑色背景底色和文字
-                Cv2.Rectangle(frame, bgRect, new Scalar(0, 0, 0), -1);
-                Cv2.PutText(frame, text, new OpenCvSharp.Point(result.Box.X + 5, textY), HersheyFonts.HersheySimplex, 0.8, Scalar.LimeGreen, 2);
+                Cv2.Rectangle(frame, textBgRect, dynamicBoxColor, -1);
+                Cv2.PutText(frame, text, new OpenCvSharp.Point(result.Box.X + 5, textY + textSize.Height + 2), 
+                           HersheyFonts.HersheySimplex, 0.7, Scalar.Black, 2, LineTypes.AntiAlias);
             }
 
             // 检测1：错误动作
@@ -231,9 +237,13 @@ namespace edge_runtime.Services
                 currentStep.BorderColor = Brushes.Transparent;
             });
 
-            // 保存截图并记录到数据库
-            string imagePath = _logService?.SaveFrame(frame, currentStep.Name, "NG");
-            _logService?.LogToDb(currentStep.Name, "NG", imagePath);
+            // 克隆 frame 避免在异步保存时 frame 被修改或释放
+            using (Mat frameCopy = frame.Clone())
+            {
+                // 保存截图并记录到数据库
+                string imagePath = _logService?.SaveFrame(frameCopy, currentStep.Name, "NG");
+                _logService?.LogToDb(currentStep.Name, "NG", imagePath);
+            }
         }
 
         /// <summary>
@@ -260,9 +270,13 @@ namespace edge_runtime.Services
                 currentStep.BorderColor = Brushes.Transparent;
             });
 
-            // 保存超时截图
-            string timeoutPath = _logService?.SaveFrame(frame, currentStep.Name, "TIMEOUT");
-            _logService?.LogToDb(currentStep.Name, "TIMEOUT", timeoutPath);
+            // 克隆 frame 避免在异步保存时 frame 被修改或释放
+            using (Mat frameCopy = frame.Clone())
+            {
+                // 保存超时截图
+                string timeoutPath = _logService?.SaveFrame(frameCopy, currentStep.Name, "TIMEOUT");
+                _logService?.LogToDb(currentStep.Name, "TIMEOUT", timeoutPath);
+            }
 
             // 重置计时器（准备下一次检测）
             _stepLastDetectTime[_currentStepIndex] = DateTime.Now;

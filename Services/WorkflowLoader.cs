@@ -46,6 +46,12 @@ namespace edge_runtime.Services
             public string ModelPath { get; set; }
 
             /// <summary>
+            /// 模型输入尺寸（如640、512等）
+            /// 用于自适应图像预处理，匹配模型的实际输入要求
+            /// </summary>
+            public int ModelInputSize { get; set; } = 640;
+
+            /// <summary>
             /// 主相机ID（默认使用的第一个相机）
             /// </summary>
             public string PrimaryCameraId { get; set; }
@@ -99,7 +105,8 @@ namespace edge_runtime.Services
                 ActionColumns = new ObservableCollection<ProcessActionViewModel>(),
                 ExecutionQueue = new List<ProcessStateViewModel>(),
                 CameraIds = new HashSet<string>(),
-                ModelPath = workflow.ModelPath
+                ModelPath = workflow.ModelPath,
+                ModelInputSize = workflow.ModelInputSize  // 从JSON配置读取模型输入尺寸
             };
 
             // 遍历所有动作（Actions）

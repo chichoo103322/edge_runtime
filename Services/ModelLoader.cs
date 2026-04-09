@@ -17,8 +17,9 @@ namespace edge_runtime.Services
         /// 加载AI模型
         /// </summary>
         /// <param name="modelPath">模型文件路径（可以是相对路径或绝对路径）</param>
+        /// <param name="modelInputSize">模型输入尺寸（默认640）</param>
         /// <returns>加载成功的推理服务实例，失败返回null</returns>
-        public OnnxInferenceService LoadModel(string modelPath)
+        public OnnxInferenceService LoadModel(string modelPath, int modelInputSize = 640)
         {
             // 验证：路径不能为空
             if (string.IsNullOrEmpty(modelPath))
@@ -48,10 +49,10 @@ namespace edge_runtime.Services
                 // 从模型元数据读取标签列表
                 var labels = OnnxHelper.ReadLabelsFromModel(finalModelPath);
 
-                // 创建推理服务
-                var aiService = new OnnxInferenceService(finalModelPath, labels);
+                // 创建推理服务（传入模型输入尺寸，支持自适应预处理）
+                var aiService = new OnnxInferenceService(finalModelPath, labels, modelInputSize);
 
-                string msg = $"AI 模型已成功加载: {finalModelPath}";
+                string msg = $"AI 模型已成功加载: {finalModelPath} (输入尺寸: {modelInputSize}x{modelInputSize})";
                 MessageBox.Show(msg);
                 UILogManager.Instance.LogInfo(msg);
 

@@ -1,0 +1,44 @@
+{
+  "modelPath": "models/yolov5-action.onnx",
+  "modelInputSize": 640,
+  "actions": [
+    {
+      "id": "action_001",
+      "name": "Assembly",
+      "stationName": "Assembly Station",
+      "states": [
+        {
+          "id": "state_001",
+          "name": "Pick Component",
+          "selectedLabel": "PickUp",
+          "threshold": 0.75,
+          "cameraDevice": "Camera_1",
+          "standardVideoPath": "videos/pick_component_standard.mp4"
+        },
+        {
+          "id": "state_002",
+          "name": "Place Component",
+          "selectedLabel": "Place",
+          "threshold": 0.75,
+          "cameraDevice": "Camera_1",
+          "standardVideoPath": "videos/place_component_standard.mp4"
+        }
+      ]
+    },
+    {
+      "id": "action_002",
+      "name": "Inspection",
+      "stationName": "Inspection Station",
+      "states": [
+        {
+          "id": "state_003",
+          "name": "Visual Check",
+          "selectedLabel": "Inspect",
+          "threshold": 0.75,
+          "cameraDevice": "Camera_2",
+          "standardVideoPath": "videos/visual_check_standard.mp4"
+        }
+      ]
+    }
+  ]
+}

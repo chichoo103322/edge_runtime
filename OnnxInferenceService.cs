@@ -366,10 +366,13 @@ namespace edge_runtime
                             bestLabel = _labels[bestClassIdx];
 
                             // 步骤 2: 逆向映射坐标到原始图像空间
-                            // 模型输出的坐标是相对于 Letterbox 处理后的图像
-                            // 需要减去灰色填充偏移，然后除以缩放比例
-                            int x = (int)Math.Round((cx - dw - bw / 2.0f) / r);
-                            int y = (int)Math.Round((cy - dh - bh / 2.0f) / r);
+                            // 模型输出的坐标是相对于 Letterbox 处理后的图像的中心坐标 (cx, cy) 和宽高 (w, h)
+                            // 需要：
+                            // 1. 先减去灰色填充偏移
+                            // 2. 再除以缩放比例 r
+                            // 3. 计算左上角坐标（从中心坐标转换）
+                            int x = (int)Math.Round(((cx - dw) / r) - (bw / r) / 2.0f);
+                            int y = (int)Math.Round(((cy - dh) / r) - (bh / r) / 2.0f);
                             int w = (int)Math.Round(bw / r);
                             int h = (int)Math.Round(bh / r);
 
@@ -412,9 +415,9 @@ namespace edge_runtime
                             bestLabel = _labels[bestClassIdx];
 
                             // 步骤 2: 逆向映射坐标到原始图像空间
-                            // YOLOv8 同样需要坐标映射
-                            int x = (int)Math.Round((cx - dw - bw / 2.0f) / r);
-                            int y = (int)Math.Round((cy - dh - bh / 2.0f) / r);
+                            // YOLOv8 同样需要坐标映射（中心坐标 -> 左上角坐标）
+                            int x = (int)Math.Round(((cx - dw) / r) - (bw / r) / 2.0f);
+                            int y = (int)Math.Round(((cy - dh) / r) - (bh / r) / 2.0f);
                             int w = (int)Math.Round(bw / r);
                             int h = (int)Math.Round(bh / r);
 
