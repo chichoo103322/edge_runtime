@@ -81,7 +81,23 @@ namespace edge_runtime
         }
 
         // 识别结果结构体
-        public struct Prediction { public string Label; public float Confidence; }
+        public struct Prediction
+        {
+            /// <summary>
+            /// 检测到的类别标签
+            /// </summary>
+            public string Label;
+
+            /// <summary>
+            /// 检测置信度（0.0 ~ 1.0）
+            /// </summary>
+            public float Confidence;
+
+            /// <summary>
+            /// 边界框（映射到原始图像坐标系）
+            /// </summary>
+            public Rect Box;
+        }
 
         /// <summary>
         /// YOLO Letterbox 预处理 - 等比例缩放 + 灰色填充
@@ -136,7 +152,7 @@ namespace edge_runtime
         }
 
         /// <summary>
-        /// 执行推理（核心方法）- 自动处理任意尺寸图像
+        /// 执行推理（核心方法）- 自动处理任意尺寸图像，并返回映射到原始坐标系的边界框
         /// 
         /// 自适应流程：
         /// 1. 使用Letterbox等比例缩放到模型要求的尺寸
@@ -144,16 +160,18 @@ namespace edge_runtime
         /// 3. 归一化像素值到[0,1]
         /// 4. 转换通道格式（BGR->RGB）
         /// 5. 执行ONNX推理
-        /// 6. 返回置信度最高的预测结果
+        /// 6. 解析 YOLO 输出并获取最高置信度的预测框
+        /// 7. 将边界框坐标从模型输入空间映射回原始图像空间
         /// 
         /// 优势：
         /// - 输入图像尺寸无限制（512、1080、4K等都可处理）
         /// - 自动匹配模型输入要求（动态读取模型配置）
         /// - 完全杜绝"Got 512 Expected 640"错误
         /// - 图像不变形，识别精度不下降
+        /// - 返回的边界框坐标已映射到原始图像尺寸
         /// </summary>
         /// <param name="frame">任意尺寸的输入图像（相机帧）</param>
-        /// <returns>识别结果（标签+置信度）</returns>
+        /// <returns>识别结果（标签+置信度+边界框）</returns>
         public Prediction Predict(Mat frame)
         {
             // 前置条件检查
@@ -162,6 +180,15 @@ namespace edge_runtime
 
             try
             {
+                // 保存原始图像的宽高
+                int origW = frame.Cols;
+                int origH = frame.Rows;
+
+                // 计算缩放参数（用于后续逆向换算坐标）
+                float r = Math.Min((float)_inputWidth / origW, (float)_inputHeight / origH);
+                int dw = (_inputWidth - (int)Math.Round(origW * r)) / 2;
+                int dh = (_inputHeight - (int)Math.Round(origH * r)) / 2;
+
                 // 步骤1: 使用 Letterbox 进行等比例缩放和灰色填充
                 using (var processed = Letterbox(frame))
                 {
@@ -179,17 +206,17 @@ namespace edge_runtime
 
                             // 转换为 RGB 并归一化到 [0, 1]
                             // 注意：OpenCV 默认是 BGR 格式，需要反序为 RGB
-                            float r = pixel[2] / 255.0f;  // B channel -> R
-                            float g = pixel[1] / 255.0f;  // G channel
-                            float b = pixel[0] / 255.0f;  // R channel -> B
+                            float red = pixel[2] / 255.0f;    // B channel -> R
+                            float green = pixel[1] / 255.0f;  // G channel
+                            float blue = pixel[0] / 255.0f;   // R channel -> B
 
                             // 按 CHW 顺序存储（Channel-Height-Width）
                             // R 通道
-                            tensorData[0 * _inputHeight * _inputWidth + h * _inputWidth + w] = r;
+                            tensorData[0 * _inputHeight * _inputWidth + h * _inputWidth + w] = red;
                             // G 通道
-                            tensorData[1 * _inputHeight * _inputWidth + h * _inputWidth + w] = g;
+                            tensorData[1 * _inputHeight * _inputWidth + h * _inputWidth + w] = green;
                             // B 通道
-                            tensorData[2 * _inputHeight * _inputWidth + h * _inputWidth + w] = b;
+                            tensorData[2 * _inputHeight * _inputWidth + h * _inputWidth + w] = blue;
                         }
                     }
 
@@ -202,7 +229,8 @@ namespace edge_runtime
                     var output = results.First().AsEnumerable<float>().ToArray();
 
                     // 步骤5: YOLO 后处理 - 解析预测框并获取最高置信度的检测结果
-                    return ParseYoloOutput(output);
+                    // 传递原始图像尺寸和缩放参数，用于坐标映射
+                    return ParseYoloOutput(output, origW, origH, r, dw, dh);
                 }
             }
             catch (Exception ex)
@@ -212,7 +240,7 @@ namespace edge_runtime
         }
 
         /// <summary>
-        /// 解析 YOLO 模型输出并返回最高置信度的检测结果
+        /// 解析 YOLO 模型输出并返回最高置信度的检测结果（含坐标映射）
         /// 
         /// 支持两种 YOLO 版本：
         /// 1. YOLOv5：输出格式 [batch, num_detections, 5 + num_classes]
@@ -220,24 +248,37 @@ namespace edge_runtime
         /// 2. YOLOv8：输出格式 [batch, num_detections, 4 + num_classes]
         ///    - [x, y, w, h, class_scores...]（无单独的 obj_conf）
         /// 
+        /// 坐标映射：
+        /// 1. YOLO 输出的边界框坐标相对于 Letterbox 预处理后的图像（640x640 或其他尺寸）
+        /// 2. 需要逆向映射回原始图像坐标系统
+        /// 3. 映射公式：
+        ///    - 原坐标 = (模型坐标 - 灰色填充偏移) / 缩放比例
+        ///    - x = (cx - dw) / r, y = (cy - dh) / r
+        /// 
         /// 算法：
-        /// 1. 转置输出张量为 [num_detections, channels]
-        /// 2. 遍历每个检测框：
-        ///    - 对于 YOLOv5：检查 obj_conf >= CONF_THRESHOLD，然后获取最高的 class_score
-        ///    - 对于 YOLOv8：直接获取最高的 class_score
-        /// 3. 返回置信度最高的检测结果
+        /// 1. 推断 YOLO 版本（YOLOv5 vs YOLOv8）
+        /// 2. 遍历每个检测框
+        /// 3. 提取边界框坐标（cx, cy, w, h）和置信度
+        /// 4. 逆向映射坐标到原始图像空间
+        /// 5. 返回置信度最高的检测结果（含映射后的边界框）
         /// </summary>
         /// <param name="output">ONNX 模型的原始输出张量</param>
-        /// <returns>最高置信度的预测结果（标签+置信度）</returns>
-        private Prediction ParseYoloOutput(float[] output)
+        /// <param name="origW">原始图像宽度</param>
+        /// <param name="origH">原始图像高度</param>
+        /// <param name="r">缩放比例（scale ratio）</param>
+        /// <param name="dw">水平灰色填充偏移（padding width）</param>
+        /// <param name="dh">竖直灰色填充偏移（padding height）</param>
+        /// <returns>最高置信度的预测结果（标签+置信度+映射后的边界框）</returns>
+        private Prediction ParseYoloOutput(float[] output, int origW, int origH, float r, int dw, int dh)
         {
             // 默认返回结果
             string bestLabel = "Unknown";
             float bestConf = 0.0f;
+            Rect bestBox = new Rect(0, 0, 0, 0);
 
             // 检查输出是否为空
             if (output == null || output.Length == 0)
-                return new Prediction { Label = bestLabel, Confidence = bestConf };
+                return new Prediction { Label = bestLabel, Confidence = bestConf, Box = bestBox };
 
             try
             {
@@ -286,6 +327,12 @@ namespace edge_runtime
                 {
                     int offset = i * features;
 
+                    // 步骤 1: 提取边界框坐标（总是在前 4 个位置）
+                    float cx = output[offset + 0];      // 中心 X 坐标
+                    float cy = output[offset + 1];      // 中心 Y 坐标
+                    float bw = output[offset + 2];      // 边界框宽度
+                    float bh = output[offset + 3];      // 边界框高度
+
                     if (hasObjectness)
                     {
                         // YOLOv5 格式：[x, y, w, h, obj_conf, class_scores...]
@@ -317,6 +364,26 @@ namespace edge_runtime
                         {
                             bestConf = finalConf;
                             bestLabel = _labels[bestClassIdx];
+
+                            // 步骤 2: 逆向映射坐标到原始图像空间
+                            // 模型输出的坐标是相对于 Letterbox 处理后的图像
+                            // 需要减去灰色填充偏移，然后除以缩放比例
+                            int x = (int)Math.Round((cx - dw - bw / 2.0f) / r);
+                            int y = (int)Math.Round((cy - dh - bh / 2.0f) / r);
+                            int w = (int)Math.Round(bw / r);
+                            int h = (int)Math.Round(bh / r);
+
+                            // 步骤 3: 限制边界防止越界
+                            x = Math.Max(0, x);
+                            y = Math.Max(0, y);
+                            w = Math.Min(origW - x, w);
+                            h = Math.Min(origH - y, h);
+
+                            // 确保宽高为正
+                            w = Math.Max(0, w);
+                            h = Math.Max(0, h);
+
+                            bestBox = new Rect(x, y, w, h);
                         }
                     }
                     else
@@ -343,6 +410,25 @@ namespace edge_runtime
                         {
                             bestConf = finalConf;
                             bestLabel = _labels[bestClassIdx];
+
+                            // 步骤 2: 逆向映射坐标到原始图像空间
+                            // YOLOv8 同样需要坐标映射
+                            int x = (int)Math.Round((cx - dw - bw / 2.0f) / r);
+                            int y = (int)Math.Round((cy - dh - bh / 2.0f) / r);
+                            int w = (int)Math.Round(bw / r);
+                            int h = (int)Math.Round(bh / r);
+
+                            // 步骤 3: 限制边界防止越界
+                            x = Math.Max(0, x);
+                            y = Math.Max(0, y);
+                            w = Math.Min(origW - x, w);
+                            h = Math.Min(origH - y, h);
+
+                            // 确保宽高为正
+                            w = Math.Max(0, w);
+                            h = Math.Max(0, h);
+
+                            bestBox = new Rect(x, y, w, h);
                         }
                     }
                 }
@@ -350,13 +436,14 @@ namespace edge_runtime
                 return new Prediction
                 {
                     Label = bestLabel,
-                    Confidence = bestConf
+                    Confidence = bestConf,
+                    Box = bestBox
                 };
             }
             catch (Exception ex)
             {
                 // 异常情况返回默认结果
-                return new Prediction { Label = bestLabel, Confidence = bestConf };
+                return new Prediction { Label = bestLabel, Confidence = bestConf, Box = bestBox };
             }
         }
     }

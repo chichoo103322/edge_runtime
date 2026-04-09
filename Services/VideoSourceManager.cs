@@ -184,13 +184,15 @@ namespace edge_runtime.Services
                             continue;
                         }
 
-                        // 转换为WPF BitmapSource用于显示
+                        // 步骤1: 先触发 AI 推理处理帧
+                        // 在此过程中 WorkflowExecutor 会直接在 frame 上绘制检测框和置信度
+                        _onFrameProcessing?.Invoke(frame);
+
+                        // 步骤2: 再将被画过框的 frame 转换为 BitmapSource 交给 UI 显示
+                        // 这样 UI 上显示的画面就包含了 AI 检测结果的可视化
                         var bitmap = frame.ToBitmapSource();
                         bitmap.Freeze(); // 冻结以便跨线程传递
                         Application.Current?.Dispatcher.Invoke(() => _onFrameReceived(bitmap));
-
-                        // 处理帧（AI推理）
-                        _onFrameProcessing?.Invoke(frame);
 
                         // 控制帧率（约33fps）
                         Thread.Sleep(30);

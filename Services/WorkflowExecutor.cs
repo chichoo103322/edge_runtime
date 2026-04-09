@@ -114,6 +114,25 @@ namespace edge_runtime.Services
             // 执行AI识别
             var result = _aiService.Predict(frame);
 
+            // 在图像上绘制检测结果（边界框和标签）
+            if (!string.IsNullOrEmpty(result.Label) && result.Label != "Unknown" && result.Confidence > 0)
+            {
+                // 1. 绘制边界框 (绿色, 粗细2)
+                Cv2.Rectangle(frame, result.Box, Scalar.LimeGreen, 2);
+
+                // 2. 准备文字内容
+                string text = $"{result.Label} {result.Confidence:P1}";
+
+                // 3. 计算文字背景尺寸
+                var textSize = Cv2.GetTextSize(text, HersheyFonts.HersheySimplex, 0.8, 2, out int baseline);
+                int textY = Math.Max(result.Box.Y, textSize.Height + 10); // 防止文字超出顶部
+                var bgRect = new OpenCvSharp.Rect(result.Box.X, textY - textSize.Height - 5, textSize.Width + 10, textSize.Height + 10);
+
+                // 4. 绘制半透明黑色背景底色和文字
+                Cv2.Rectangle(frame, bgRect, new Scalar(0, 0, 0), -1);
+                Cv2.PutText(frame, text, new OpenCvSharp.Point(result.Box.X + 5, textY), HersheyFonts.HersheySimplex, 0.8, Scalar.LimeGreen, 2);
+            }
+
             // 检测1：错误动作
             if (ERROR_ACTIONS.Contains(result.Label))
             {
