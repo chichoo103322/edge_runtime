@@ -226,11 +226,13 @@ namespace edge_runtime
                     // 步骤4: 执行推理（使用动态获取的输入名称）
                     var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_inputName, tensor) };
                     using var results = _session.Run(inputs);
-                    var output = results.First().AsEnumerable<float>().ToArray();
+
+                    // 保持张量结构，不再使用 ToArray() 拍扁
+                    var outputTensor = results.First().AsTensor<float>();
 
                     // 步骤5: YOLO 后处理 - 解析预测框并获取最高置信度的检测结果
                     // 传递原始图像尺寸和缩放参数，用于坐标映射
-                    return ParseYoloOutput(output, origW, origH, r, dw, dh);
+                    return ParseYoloOutput(outputTensor, origW, origH, r, dw, dh);
                 }
             }
             catch (Exception ex)
@@ -242,113 +244,74 @@ namespace edge_runtime
         /// <summary>
         /// 解析 YOLO 模型输出并返回最高置信度的检测结果（含坐标映射）
         /// 
-        /// 支持两种 YOLO 版本：
-        /// 1. YOLOv5：输出格式 [batch, num_detections, 5 + num_classes]
-        ///    - [x, y, w, h, obj_conf, class_scores...]
-        /// 2. YOLOv8：输出格式 [batch, num_detections, 4 + num_classes]
-        ///    - [x, y, w, h, class_scores...]（无单独的 obj_conf）
-        /// 
-        /// 坐标映射：
-        /// 1. YOLO 输出的边界框坐标相对于 Letterbox 预处理后的图像（640x640 或其他尺寸）
-        /// 2. 需要逆向映射回原始图像坐标系统
-        /// 3. 映射公式：
-        ///    - 原坐标 = (模型坐标 - 灰色填充偏移) / 缩放比例
-        ///    - x = (cx - dw) / r, y = (cy - dh) / r
-        /// 
-        /// 算法：
-        /// 1. 推断 YOLO 版本（YOLOv5 vs YOLOv8）
-        /// 2. 遍历每个检测框
-        /// 3. 提取边界框坐标（cx, cy, w, h）和置信度
-        /// 4. 逆向映射坐标到原始图像空间
-        /// 5. 返回置信度最高的检测结果（含映射后的边界框）
+        /// 核心改进：
+        /// 1. 智能判断张量维度并自动处理 [1, 84, 8400] (YOLOv8) 和 [1, N, 85] (YOLOv5) 格式
+        /// 2. 使用 isTransposed 标志替代 Python 的 .T 转置，彻底解决坐标错位问题
+        /// 3. 提取公共的坐标映射逻辑到 CalculateBox 方法，减少代码重复
         /// </summary>
-        /// <param name="output">ONNX 模型的原始输出张量</param>
+        /// <param name="output">ONNX 模型的输出张量（保持多维结构）</param>
         /// <param name="origW">原始图像宽度</param>
         /// <param name="origH">原始图像高度</param>
         /// <param name="r">缩放比例（scale ratio）</param>
         /// <param name="dw">水平灰色填充偏移（padding width）</param>
         /// <param name="dh">竖直灰色填充偏移（padding height）</param>
         /// <returns>最高置信度的预测结果（标签+置信度+映射后的边界框）</returns>
-        private Prediction ParseYoloOutput(float[] output, int origW, int origH, float r, int dw, int dh)
+        private Prediction ParseYoloOutput(Tensor<float> output, int origW, int origH, float r, int dw, int dh)
         {
-            // 默认返回结果
             string bestLabel = "Unknown";
             float bestConf = 0.0f;
             Rect bestBox = new Rect(0, 0, 0, 0);
 
-            // 检查输出是否为空
             if (output == null || output.Length == 0)
                 return new Prediction { Label = bestLabel, Confidence = bestConf, Box = bestBox };
 
             try
             {
-                // 推断输出张量的维度
-                // YOLO 输出通常是 [batch=1, num_detections, features]
-                // output 被展平后的长度应该是 num_detections * features
+                var dims = output.Dimensions;
+                int dimsLength = dims.Length;
 
-                int nc = _labels.Count;  // 类别数量
+                // 核心修复：动态判断是否需要转置 (针对 YOLOv8 的 [1, 84, 8400] 格式)
+                bool isTransposed = dimsLength == 3 && dims[1] < dims[2];
 
-                // 判断模型版本：
-                // YOLOv5: features = 5 + nc（有单独的 obj_conf）
-                // YOLOv8: features = 4 + nc（无单独的 obj_conf）
+                // 获取特征数和检测框总数
+                int features = isTransposed ? dims[1] : dims[dimsLength - 1];
+                int numDetections = isTransposed ? dims[2] : dims[dimsLength - 2];
+                int nc = _labels.Count;
 
-                // 计算每个检测的特征数量
-                int features;
-                int numDetections;
-
-                // 尝试推断正确的格式
-                // 假设输出长度 = num_detections * features
-                // 我们需要找到合适的 features 数量
-
-                if (output.Length % (5 + nc) == 0)
-                {
-                    // YOLOv5 格式
-                    features = 5 + nc;
-                    numDetections = output.Length / features;
-                }
-                else if (output.Length % (4 + nc) == 0)
-                {
-                    // YOLOv8 格式
-                    features = 4 + nc;
-                    numDetections = output.Length / features;
-                }
-                else
-                {
-                    // 无法推断格式，尝试 YOLOv5 作为默认
-                    features = 5 + nc;
-                    numDetections = output.Length / features;
-                }
-
-                // 判断是否有单独的 objectness 置信度
                 bool hasObjectness = (features == 5 + nc);
+
+                // 局部辅助函数：根据张量的实际排列顺序，安全地取值，替代 Python 的 .T 转置
+                float GetValue(int detIndex, int featureIndex)
+                {
+                    if (dimsLength == 3)
+                        return isTransposed ? output[0, featureIndex, detIndex] : output[0, detIndex, featureIndex];
+                    else if (dimsLength == 2)
+                        return isTransposed ? output[featureIndex, detIndex] : output[detIndex, featureIndex];
+                    return 0f;
+                }
 
                 // 遍历所有检测框
                 for (int i = 0; i < numDetections; i++)
                 {
-                    int offset = i * features;
-
-                    // 步骤 1: 提取边界框坐标（总是在前 4 个位置）
-                    float cx = output[offset + 0];      // 中心 X 坐标
-                    float cy = output[offset + 1];      // 中心 Y 坐标
-                    float bw = output[offset + 2];      // 边界框宽度
-                    float bh = output[offset + 3];      // 边界框高度
+                    // 使用辅助函数读取坐标，彻底解决错位问题
+                    float cx = GetValue(i, 0);
+                    float cy = GetValue(i, 1);
+                    float bw = GetValue(i, 2);
+                    float bh = GetValue(i, 3);
 
                     if (hasObjectness)
                     {
-                        // YOLOv5 格式：[x, y, w, h, obj_conf, class_scores...]
-                        float objConf = output[offset + 4];
+                        // YOLOv5 格式: [x, y, w, h, obj_conf, class_scores...]
+                        float objConf = GetValue(i, 4);
 
-                        // 检测置信度不足，跳过
-                        if (objConf < CONF_THRESHOLD)
-                            continue;
+                        if (objConf < CONF_THRESHOLD) continue;
 
-                        // 获取类别分数
                         float maxClassScore = float.MinValue;
                         int bestClassIdx = -1;
 
                         for (int c = 0; c < nc; c++)
                         {
-                            float classScore = output[offset + 5 + c];
+                            float classScore = GetValue(i, 5 + c);
                             if (classScore > maxClassScore)
                             {
                                 maxClassScore = classScore;
@@ -356,48 +319,24 @@ namespace edge_runtime
                             }
                         }
 
-                        // 计算最终置信度：obj_conf * class_score
                         float finalConf = objConf * maxClassScore;
 
-                        // 更新最高置信度结果
                         if (finalConf >= CONF_THRESHOLD && finalConf > bestConf && bestClassIdx >= 0 && bestClassIdx < nc)
                         {
                             bestConf = finalConf;
                             bestLabel = _labels[bestClassIdx];
-
-                            // 步骤 2: 逆向映射坐标到原始图像空间
-                            // 模型输出的坐标是相对于 Letterbox 处理后的图像的中心坐标 (cx, cy) 和宽高 (w, h)
-                            // 需要：
-                            // 1. 先减去灰色填充偏移
-                            // 2. 再除以缩放比例 r
-                            // 3. 计算左上角坐标（从中心坐标转换）
-                            int x = (int)Math.Round(((cx - dw) / r) - (bw / r) / 2.0f);
-                            int y = (int)Math.Round(((cy - dh) / r) - (bh / r) / 2.0f);
-                            int w = (int)Math.Round(bw / r);
-                            int h = (int)Math.Round(bh / r);
-
-                            // 步骤 3: 限制边界防止越界
-                            x = Math.Max(0, x);
-                            y = Math.Max(0, y);
-                            w = Math.Min(origW - x, w);
-                            h = Math.Min(origH - y, h);
-
-                            // 确保宽高为正
-                            w = Math.Max(0, w);
-                            h = Math.Max(0, h);
-
-                            bestBox = new Rect(x, y, w, h);
+                            bestBox = CalculateBox(cx, cy, bw, bh, origW, origH, r, dw, dh);
                         }
                     }
                     else
                     {
-                        // YOLOv8 格式：[x, y, w, h, class_scores...]
+                        // YOLOv8 格式: [x, y, w, h, class_scores...]
                         float maxClassScore = float.MinValue;
                         int bestClassIdx = -1;
 
                         for (int c = 0; c < nc; c++)
                         {
-                            float classScore = output[offset + 4 + c];
+                            float classScore = GetValue(i, 4 + c);
                             if (classScore > maxClassScore)
                             {
                                 maxClassScore = classScore;
@@ -405,49 +344,38 @@ namespace edge_runtime
                             }
                         }
 
-                        // 直接使用类别分数作为置信度
                         float finalConf = maxClassScore;
 
-                        // 更新最高置信度结果
                         if (finalConf >= CONF_THRESHOLD && finalConf > bestConf && bestClassIdx >= 0 && bestClassIdx < nc)
                         {
                             bestConf = finalConf;
                             bestLabel = _labels[bestClassIdx];
-
-                            // 步骤 2: 逆向映射坐标到原始图像空间
-                            // YOLOv8 同样需要坐标映射（中心坐标 -> 左上角坐标）
-                            int x = (int)Math.Round(((cx - dw) / r) - (bw / r) / 2.0f);
-                            int y = (int)Math.Round(((cy - dh) / r) - (bh / r) / 2.0f);
-                            int w = (int)Math.Round(bw / r);
-                            int h = (int)Math.Round(bh / r);
-
-                            // 步骤 3: 限制边界防止越界
-                            x = Math.Max(0, x);
-                            y = Math.Max(0, y);
-                            w = Math.Min(origW - x, w);
-                            h = Math.Min(origH - y, h);
-
-                            // 确保宽高为正
-                            w = Math.Max(0, w);
-                            h = Math.Max(0, h);
-
-                            bestBox = new Rect(x, y, w, h);
+                            bestBox = CalculateBox(cx, cy, bw, bh, origW, origH, r, dw, dh);
                         }
                     }
                 }
 
-                return new Prediction
-                {
-                    Label = bestLabel,
-                    Confidence = bestConf,
-                    Box = bestBox
-                };
-            }
-            catch (Exception ex)
-            {
-                // 异常情况返回默认结果
                 return new Prediction { Label = bestLabel, Confidence = bestConf, Box = bestBox };
             }
+            catch (Exception)
+            {
+                return new Prediction { Label = bestLabel, Confidence = bestConf, Box = bestBox };
+            }
+        }
+
+        private Rect CalculateBox(float cx, float cy, float bw, float bh, int origW, int origH, float r, int dw, int dh)
+        {
+            int x = (int)Math.Round(((cx - dw) / r) - (bw / r) / 2.0f);
+            int y = (int)Math.Round(((cy - dh) / r) - (bh / r) / 2.0f);
+            int w = (int)Math.Round(bw / r);
+            int h = (int)Math.Round(bh / r);
+
+            x = Math.Max(0, x);
+            y = Math.Max(0, y);
+            w = Math.Min(origW - x, w);
+            h = Math.Min(origH - y, h);
+
+            return new Rect(x, y, Math.Max(0, w), Math.Max(0, h));
         }
     }
 }
